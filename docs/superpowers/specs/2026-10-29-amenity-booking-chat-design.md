@@ -65,7 +65,7 @@ This follows home-vision's own `AskHoaiPanel` conversation mode (`../home-vision
 ### Time slots and booking length
 
 - Start times are on the hour, from opening time to the last start that still ends by closing time. For example, the Clubhouse (4 hr, 9 AM–11 PM) has starts from 9 AM to 7 PM.
-- Starts can overlap. A booking blocks every start whose time range overlaps it: a 10 AM–2 PM Clubhouse booking blocks 7 AM through 1 PM starts.
+- Starts can overlap. A booking blocks every start whose time range overlaps it: a 10 AM–2 PM Clubhouse booking blocks the 9 AM through 1 PM starts (9 AM is the earliest start, since the Clubhouse opens at 9).
 - On today's date, start times that have already passed aren't shown.
 - A typed time that isn't on the hour (e.g. "10:30") snaps to the nearest earlier start, and the reply says so ("The closest start is 10:00 AM").
 
