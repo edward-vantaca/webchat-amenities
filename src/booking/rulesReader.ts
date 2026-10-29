@@ -43,7 +43,8 @@ function monthDay(today: ISODate, month: number, day: number): ISODate | undefin
 function dayOfMonth(today: ISODate, day: number): ISODate | undefined {
   const start = fromISODate(today);
   for (let i = 0; i < 12; i++) {
-    const date = validDate(start.getFullYear(), start.getMonth() + i, day);
+    const m = start.getMonth() + i;
+    const date = validDate(start.getFullYear() + Math.floor(m / 12), m % 12, day);
     if (date && date >= today) return date;
   }
   return undefined;

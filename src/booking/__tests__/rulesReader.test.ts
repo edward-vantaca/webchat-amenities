@@ -42,6 +42,10 @@ describe("parseMessage", () => {
     const r = p("tennis");
     expect(r).toEqual({ intent: "book", slots: { amenity: "tennis" } });
   });
+  test("the 14th rolls across the year boundary", () =>
+    expect(parseMessage("the 14th", "2026-12-20").slots.date).toBe("2027-01-14"));
+  test("month-name date earlier than today rolls to next year", () =>
+    expect(p("oct 1")).toMatchObject({ slots: { date: "2027-10-01" }, outOfWindow: true }));
   test("weekend on a Sunday is that day only", () =>
     expect(parseMessage("this weekend", "2026-11-01").range).toEqual({ from: "2026-11-01", to: "2026-11-01" }));
 });
