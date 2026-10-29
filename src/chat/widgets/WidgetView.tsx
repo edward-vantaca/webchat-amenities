@@ -57,6 +57,7 @@ export function WidgetView({
     <div
       className={`ml-8 min-w-0 ${message.active ? "" : "opacity-50 pointer-events-none"}`}
       aria-disabled={message.active ? undefined : "true"}
+      inert={!message.active}
     >
       {body}
     </div>

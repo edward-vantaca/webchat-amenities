@@ -1,18 +1,21 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import AskHoaiPanel from "../AskHoaiPanel";
 import { interpret } from "@/booking/interpret";
-import { isMockTaken, startTimes } from "@/booking/availability";
-import { formatHour } from "@/booking/dates";
+import { isFullyBookedByMock, isMockTaken, startTimes } from "@/booking/availability";
+import { addDays, formatHour } from "@/booking/dates";
 
 vi.mock("@/booking/interpret", async () => {
   const actual = await vi.importActual<typeof import("@/booking/interpret")>("@/booking/interpret");
   return { ...actual, interpret: vi.fn(actual.interpret) };
 });
 
-const OPEN_DAY = "2026-11-03";
-const OPEN_HOUR = startTimes("tennis").find((h) => !isMockTaken("tennis", OPEN_DAY, h))!;
+// A November day that the mock leaves bookable: not fully booked, with an untaken start.
+const openHourOn = (d: string) => startTimes("tennis").find((h) => !isMockTaken("tennis", d, h));
+const OPEN_DAY = Array.from({ length: 20 }, (_, i) => addDays("2026-11-03", i))
+  .find((d) => !isFullyBookedByMock("tennis", d) && openHourOn(d) !== undefined)!;
+const OPEN_HOUR = openHourOn(OPEN_DAY)!;
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -40,9 +43,19 @@ describe("AskHoaiPanel conversation", () => {
     render(<AskHoaiPanel />);
     await user.type(
       screen.getByRole("textbox"),
-      `tennis on nov 3 at ${formatHour(OPEN_HOUR)}{Enter}`,
+      `tennis on nov ${Number(OPEN_DAY.slice(8))} at ${formatHour(OPEN_HOUR)}{Enter}`,
     );
     expect(await screen.findByRole("button", { name: "Confirm" })).toBeInTheDocument();
+  });
+
+  test("Enter while an IME is composing does not send", async () => {
+    render(<AskHoaiPanel />);
+    const box = screen.getByRole("textbox");
+    fireEvent.change(box, { target: { value: "tennis" } });
+    fireEvent.keyDown(box, { key: "Enter", isComposing: true });
+    expect(screen.getByText(/Welcome back/)).toBeInTheDocument();
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(await screen.findByText(/Great choice/)).toBeInTheDocument();
   });
 
   test("blank input does not send", async () => {

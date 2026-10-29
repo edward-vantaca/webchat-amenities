@@ -15,7 +15,7 @@ export function AmenityGrid({ dispatch }: { dispatch: (e: ChatEvent) => void }) 
           <span className="block px-2 pt-1.5 pb-2">
             <span className="font-['DM_Sans:SemiBold',sans-serif] font-semibold block text-[12.5px] text-[#262630]">{a.name}</span>
             <span className="block text-[11px] text-[#6b6b78]">
-              {a.hours} hr · up to {a.maxGuests}
+              {a.hours} hr · up to {a.maxGuests} guests
             </span>
           </span>
         </button>

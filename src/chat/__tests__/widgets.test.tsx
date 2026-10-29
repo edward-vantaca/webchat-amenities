@@ -34,10 +34,17 @@ describe("widgets", () => {
     expect(dispatch).toHaveBeenCalledWith({ type: "pickAmenity", amenity: "tennis", from: 7 });
   });
 
+  test("amenity tiles read booking length · up to N guests", () => {
+    setup({ kind: "amenities" });
+    expect(screen.getByRole("button", { name: /Tennis Court/ })).toHaveTextContent("1 hr · up to 4 guests");
+    expect(screen.getByRole("button", { name: /Main Clubhouse/ })).toHaveTextContent("4 hr · up to 60 guests");
+  });
+
   test("inactive widget is aria-disabled and faded", () => {
     const { container } = setup({ kind: "amenities" }, base, false);
     expect(container.firstChild).toHaveAttribute("aria-disabled", "true");
     expect((container.firstChild as HTMLElement).className).toContain("opacity-50");
+    expect(container.firstChild).toHaveAttribute("inert");
     expect((container.firstChild as HTMLElement).className).toContain("pointer-events-none");
   });
 
