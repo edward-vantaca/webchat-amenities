@@ -204,7 +204,7 @@ function onInterpreted(state: ChatState, r: Interpretation): ChatState {
   if (s.time !== undefined) d.time = s.time;
   if (s.timeOfDay) d.timeOfDay = s.timeOfDay;
   if (s.guests !== undefined) d.guests = s.guests;
-  if (r.range) d = { ...without(d, "date", "time"), range: r.range };
+  if (r.range) d = { ...without(d, "date"), range: r.range };
   if (r.intent === "find" && !s.date) {
     const range: DateRange = r.range ?? { from: todayISO, to: addDays(todayISO, 6) };
     d = { ...without(d, "date", "time"), range, find: true };
@@ -251,7 +251,7 @@ function onTap(state: ChatState, event: TapEvent, source: ChatMessage): ChatStat
       return advance(startTurn(state, getAmenity(event.amenity).name), d);
     }
     case "pickDate": {
-      const d = { ...without(draft, "time", "range", "find"), date: event.date };
+      const d = { ...without(draft, "range", "find"), date: event.date }; // keeps a typed time (R6)
       return advance(startTurn(state, formatDayLong(event.date)), d);
     }
     case "openCalendar": {

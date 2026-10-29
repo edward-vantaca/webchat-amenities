@@ -298,6 +298,48 @@ describe("calendar", () => {
   });
 });
 
+describe("typed time is kept until it is used (R6)", () => {
+  // A tennis hour together with a day it is open on and a day it is taken on (both days still bookable).
+  function hourWithOpenAndTakenDay(): { hour: number; openOn: ISODate; takenOn: ISODate } {
+    for (const hour of [10, 11, 9, 14, 16, 18, 8, 12, 13, 15, 17, 19, 20, 7]) {
+      const days = strip().filter((d) => d !== TODAY && hasOpenSlot("tennis", d, [], NOW));
+      const at = (d: ISODate) => slotsFor("tennis", d, [], NOW).find((x) => x.hour === hour)!.open;
+      const openOn = days.find(at);
+      const takenOn = days.find((d) => !at(d));
+      if (openOn && takenOn) return { hour, openOn, takenOn };
+    }
+    throw new Error("no suitable hour");
+  }
+  const { hour, openOn, takenOn } = hourWithOpenAndTakenDay();
+
+  test("typed time then a tapped open day goes straight to the summary", () => {
+    let s = typed(s0, { intent: "book", slots: { amenity: "tennis", time: hour } });
+    expect(last(s).widget?.kind).toBe("days");
+    expect(s.draft.time).toBe(hour);
+    s = chatReducer(s, { type: "pickDate", date: openOn, from: last(s).id });
+    expect(last(s).widget).toEqual({ kind: "summary", amenity: "tennis", date: openOn, time: hour, guests: 1 });
+  });
+
+  test("typed time then a tapped day where it is taken says so and shows slots", () => {
+    let s = typed(s0, { intent: "book", slots: { amenity: "tennis", time: hour } });
+    s = chatReducer(s, { type: "pickDate", date: takenOn, from: last(s).id });
+    expect(agentTexts(s).at(-1)).toBe(
+      `${formatHour(hour)} isn't available. Here are the open 1-hour slots for the Tennis Court on ${formatDayLong(takenOn)}:`,
+    );
+    expect(activeWidgets(s).map((w) => w.kind)).toEqual(["slots", "chips"]);
+    expect(s.draft.time).toBeUndefined();
+  });
+
+  test("a typed range keeps a typed time", () => {
+    let s = typed(s0, { intent: "book", slots: { amenity: "tennis", date: openOn, time: hour } });
+    s = typed(s, parseMessage("next week", TODAY));
+    expect(s.draft.date).toBeUndefined();
+    expect(s.draft.time).toBe(hour);
+    expect(s.draft.range).toEqual({ from: "2026-11-02", to: "2026-11-08" });
+    expect(last(s).widget).toEqual({ kind: "days", from: "2026-11-02", count: 7 });
+  });
+});
+
 describe("typed input", () => {
   test("userText echoes and sets pending only", () => {
     const s = chatReducer(s0, { type: "userText", text: "hello" });
