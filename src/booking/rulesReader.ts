@@ -1,6 +1,6 @@
 import { AMENITIES } from "./amenities";
 import { addDays, fromISODate, inWindow, nextWeek, toISODate, weekday } from "./dates";
-import type { AmenityId, DateRange, ISODate, Intent, Interpretation, TimeOfDay } from "./types";
+import type { AmenityId, ChangeTarget, DateRange, Draft, ISODate, Intent, Interpretation, TimeOfDay } from "./types";
 
 type Slots = Interpretation["slots"];
 type DateRead = { date?: ISODate; range?: DateRange; timeOfDay?: TimeOfDay };
@@ -57,12 +57,30 @@ function weekendRange(today: ISODate): DateRange {
   return { from, to: addDays(from, 1) };
 }
 
+// An explicit date ("Saturday, Nov 14", "11/14", "the 14th") wins over a weekday word next to it.
+function readExplicitDate(text: string, today: ISODate): ISODate | undefined {
+  const monthName = text.match(new RegExp(`\\b(${MONTH_RE})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b`));
+  if (monthName) return monthDay(today, MONTH_PREFIXES.indexOf(monthName[1].slice(0, 3)), Number(monthName[2]));
+  const numeric = text.match(/\b(\d{1,2})\/(\d{1,2})\b/);
+  if (numeric) return monthDay(today, Number(numeric[1]) - 1, Number(numeric[2]));
+  const ordinal = text.match(/\b(\d{1,2})(?:st|nd|rd|th)\b/);
+  if (ordinal) return dayOfMonth(today, Number(ordinal[1]));
+  return undefined;
+}
+
 function readDate(text: string, today: ISODate): DateRead {
   if (/\btonight\b/.test(text)) return { date: today, timeOfDay: "evening" };
   if (/\btoday\b/.test(text)) return { date: today };
   if (/\btomorrow\b/.test(text)) return { date: addDays(today, 1) };
   if (/\bthis weekend\b/.test(text)) return { range: weekendRange(today) };
+  if (/\bnext weekend\b/.test(text)) {
+    const saturday = addDays(nextWeek(today).from, 5);
+    return { range: { from: saturday, to: addDays(saturday, 1) } };
+  }
   if (/\bnext week\b/.test(text)) return { range: nextWeek(today) };
+
+  const explicit = readExplicitDate(text, today);
+  if (explicit) return { date: explicit };
 
   const nextDay = text.match(new RegExp(`\\bnext (${WEEKDAY_RE})\\b`));
   if (nextDay) {
@@ -71,17 +89,6 @@ function readDate(text: string, today: ISODate): DateRead {
   }
   const named = text.match(new RegExp(`\\b(?:this )?(${WEEKDAY_RE})\\b`));
   if (named) return { date: nextWeekdayOnOrAfter(today, WEEKDAYS.indexOf(named[1])) };
-
-  const monthName = text.match(new RegExp(`\\b(${MONTH_RE})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b`));
-  if (monthName) {
-    const month = MONTH_PREFIXES.indexOf(monthName[1].slice(0, 3));
-    return { date: monthDay(today, month, Number(monthName[2])) };
-  }
-  const numeric = text.match(/\b(\d{1,2})\/(\d{1,2})\b/);
-  if (numeric) return { date: monthDay(today, Number(numeric[1]) - 1, Number(numeric[2])) };
-
-  const ordinal = text.match(/\b(\d{1,2})(?:st|nd|rd|th)\b/);
-  if (ordinal) return { date: dayOfMonth(today, Number(ordinal[1])) };
   return {};
 }
 
@@ -98,6 +105,14 @@ function snap(hour: number, minutes: string | undefined, original: string): Time
   return minutes && minutes !== "00" ? { time: hour, snappedFrom: clean(original) } : { time: hour };
 }
 
+// A bare hour: 1–6 → PM, 7–11 → AM, 12 → noon.
+function bareHour(h: number, minutes: string | undefined, original: string): TimeRead {
+  if (h === 12) return snap(12, minutes, original);
+  if (h >= 1 && h <= 6) return snap(h + 12, minutes, original);
+  if (h >= 7 && h <= 11) return snap(h, minutes, original);
+  return {};
+}
+
 function readTime(text: string): TimeRead {
   if (/\bnoon\b/.test(text)) return { time: 12 };
 
@@ -108,12 +123,11 @@ function readTime(text: string): TimeRead {
   }
 
   const bare = text.match(/(?:\bat|@)\s*(\d{1,2})(?::(\d{2}))?\b/);
-  if (bare) {
-    const h = Number(bare[1]);
-    if (h === 12) return snap(12, bare[2], bare[0]);
-    if (h >= 1 && h <= 6) return snap(h + 12, bare[2], bare[0]);
-    if (h >= 7 && h <= 11) return snap(h, bare[2], bare[0]);
-  }
+  if (bare) return bareHour(Number(bare[1]), bare[2], bare[0]);
+
+  // "10" or "10:30" as the whole message (R9).
+  const whole = text.match(/^(\d{1,2})(?::(\d{2}))?[\s.!]*$/);
+  if (whole) return bareHour(Number(whole[1]), whole[2], `${whole[1]}${whole[2] ? `:${whole[2]}` : ""}`);
   return {};
 }
 
@@ -126,16 +140,41 @@ function readGuests(text: string): number | undefined {
 
 // ---- intent ----
 
-const CONFIRM_RE = /^(?:yes|yep|confirm|book it|looks good)[\s.!]*$/;
-const LIST_RE = /\bmy (?:reservations|bookings)\b/;
+// One or more of these words, separated by spaces/commas, with at least one real "yes".
+const CONFIRM_RE = /^(?:(?:yes|yep|confirm|book it|looks good|please|thanks|thank you)[\s,.!]*)+$/;
+const AFFIRM_RE = /\b(?:yes|yep|confirm|book it|looks good)\b/;
+const THANKS_RE = /^(?:thanks|thank you|ty)(?: so much)?[\s,.!]*$/;
+const LIST_RE = /\bmy (?:reservations?|bookings?)\b/;
 const FIND_RE = /\b(?:find|show|availability|open times)\b|\bwhen\b.*\bavailable\b/;
 const CHANGE_RE = /\b(?:different|another|change|instead|actually)\b/;
 const BOOK_RE = /\b(?:reserve|book)\b/;
 const OFF_TOPIC_RE = /\b(?:balance|arc|violation|pool key)\b/;
+const STEP_RE = /\b(?:change|different|another|back)\b.*\b(time|day|date|amenity)\b/;
+const GO_BACK_RE = /^go back[\s.!]*$/;
+const CHANGE_INTENT: Record<ChangeTarget, Intent> = { amenity: "changeAmenity", day: "changeDay", time: "changeTime" };
+
+// The most recent step of the booking in progress: the last slot filled, in amenity → day → time order.
+function lastStep(draft?: Draft): ChangeTarget {
+  if (draft?.time !== undefined && draft.date) return "time";
+  if (draft?.date || draft?.range) return "day";
+  return "amenity";
+}
+
+// "change the time", "different day", "back to amenity", bare "go back". A message that also
+// gives a new value for that step ("change the day to friday") is a plain change instead.
+function readChangeTarget(text: string, slots: Slots, draft?: Draft): ChangeTarget | undefined {
+  if (GO_BACK_RE.test(text)) return lastStep(draft);
+  const m = text.match(STEP_RE);
+  if (!m) return undefined;
+  const target: ChangeTarget = m[1] === "date" ? "day" : (m[1] as ChangeTarget);
+  const given = target === "amenity" ? slots.amenity : target === "day" ? slots.date : slots.time;
+  return given === undefined ? target : undefined;
+}
 
 function readIntent(text: string, found: { slots: Slots; range?: DateRange; ambiguous?: "court" }): Intent {
   const { slots, range, ambiguous } = found;
-  if (CONFIRM_RE.test(text)) return "confirm";
+  if (CONFIRM_RE.test(text) && AFFIRM_RE.test(text)) return "confirm";
+  if (THANKS_RE.test(text)) return "thanks";
   if (LIST_RE.test(text)) return "listReservations";
   if (FIND_RE.test(text)) return "find";
   if (CHANGE_RE.test(text)) {
@@ -150,7 +189,8 @@ function readIntent(text: string, found: { slots: Slots; range?: DateRange; ambi
 
 // ---- entry point ----
 
-export function parseMessage(input: string, today: ISODate): Interpretation {
+// `draft` (optional) lets a bare "go back" step back from wherever the booking is.
+export function parseMessage(input: string, today: ISODate, draft?: Draft): Interpretation {
   const text = input.trim().toLowerCase();
   const { amenity, ambiguous } = readAmenity(text);
   const { date, range, timeOfDay: dateTimeOfDay } = readDate(text, today);
@@ -165,7 +205,10 @@ export function parseMessage(input: string, today: ISODate): Interpretation {
   if (timeOfDay) slots.timeOfDay = timeOfDay;
   if (guests !== undefined) slots.guests = guests;
 
-  const result: Interpretation = { intent: readIntent(text, { slots, range, ambiguous }), slots };
+  const changeTarget = readChangeTarget(text, slots, draft);
+  const intent = changeTarget ? CHANGE_INTENT[changeTarget] : readIntent(text, { slots, range, ambiguous });
+  const result: Interpretation = { intent, slots };
+  if (changeTarget) result.changeTarget = changeTarget;
   if (range) result.range = range;
   if (snappedFrom) result.snappedFrom = snappedFrom;
   if (ambiguous) result.ambiguous = ambiguous;

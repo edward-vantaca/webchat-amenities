@@ -18,7 +18,8 @@ export type Booking = { confirmation: string; amenity: AmenityId; date: ISODate;
 
 export type Intent =
   | "book" | "find" | "changeAmenity" | "changeDay" | "changeTime"
-  | "confirm" | "listReservations" | "offTopic" | "unknown";
+  | "confirm" | "listReservations" | "thanks" | "offTopic" | "unknown";
+export type ChangeTarget = "amenity" | "day" | "time";
 export type Interpretation = {
   intent: Intent;
   slots: { amenity?: AmenityId; date?: ISODate; time?: number; timeOfDay?: TimeOfDay; guests?: number };
@@ -26,6 +27,7 @@ export type Interpretation = {
   snappedFrom?: string;    // e.g. "10:30" when the time was snapped to an hour
   ambiguous?: "court";
   outOfWindow?: boolean;
+  changeTarget?: ChangeTarget; // "change the time", "different day", "go back": step back like the `back` event
   reply?: string;          // future Claude reader only; v1 never sets it
 };
 
@@ -56,6 +58,6 @@ export type ChatEvent =
   | { type: "setGuests"; guests: number; from: number }
   | { type: "confirm"; from: number }
   | { type: "change"; from: number }
-  | { type: "back"; to: "amenity" | "day" | "time"; from: number }
+  | { type: "back"; to: ChangeTarget; from: number }
   | { type: "bookAnother"; from: number }
   | { type: "listReservations"; from: number };

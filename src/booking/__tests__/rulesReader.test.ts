@@ -50,6 +50,55 @@ describe("parseMessage", () => {
     expect(parseMessage("this weekend", "2026-11-01").range).toEqual({ from: "2026-11-01", to: "2026-11-01" }));
 });
 
+describe("final review fixes", () => {
+  test("an explicit date beats a weekday word (finding 2)", () => {
+    expect(p("Saturday, Nov 14").slots.date).toBe("2026-11-14");
+    expect(p("saturday nov 14").slots.date).toBe("2026-11-14");
+    expect(p("friday 11/13").slots.date).toBe("2026-11-13");
+    expect(p("monday the 16th").slots.date).toBe("2026-11-16");
+  });
+  test("next weekend is Sat-Sun of next week", () =>
+    expect(p("next weekend").range).toEqual({ from: "2026-11-07", to: "2026-11-08" }));
+  test("loose confirmations", () => {
+    for (const t of ["yes, book it", "yes please", "confirm please", "book it please", "looks good, thanks", "Yes!"]) {
+      expect(p(t).intent, t).toBe("confirm");
+    }
+  });
+  test("thanks", () => {
+    for (const t of ["thanks", "Thank you!", "ty", "thanks!"]) expect(p(t).intent, t).toBe("thanks");
+  });
+  test("singular reservation lists", () => expect(p("show my reservation").intent).toBe("listReservations"));
+  test("a bare hour as the whole message is a time (R9)", () => {
+    expect(p("10").slots.time).toBe(10);
+    expect(p("3").slots.time).toBe(15);
+    expect(p("6").slots.time).toBe(18);
+    expect(p("7").slots.time).toBe(7);
+    expect(p("12").slots.time).toBe(12);
+    expect(p("10:30")).toMatchObject({ intent: "book", slots: { time: 10 }, snappedFrom: "10:30" });
+    expect(p("2:00").slots.time).toBe(14);
+    expect(p("4 pm").slots.time).toBe(16);
+    expect(p("tennis 10").slots.time).toBeUndefined();
+  });
+  test("change/back targets (R9)", () => {
+    expect(p("change the time")).toMatchObject({ intent: "changeTime", changeTarget: "time" });
+    expect(p("different day")).toMatchObject({ intent: "changeDay", changeTarget: "day" });
+    expect(p("pick another date")).toMatchObject({ changeTarget: "day" });
+    expect(p("go back to the amenity")).toMatchObject({ intent: "changeAmenity", changeTarget: "amenity" });
+    expect(p("back to time").changeTarget).toBe("time");
+    // a new value for the target is a plain change, not a step back
+    expect(p("change the day to friday")).toMatchObject({ intent: "changeDay", slots: { date: "2026-10-30" } });
+    expect(p("change the day to friday").changeTarget).toBeUndefined();
+  });
+  test("bare go back means the most recent step", () => {
+    const at = (draft: Parameters<typeof parseMessage>[2]) => parseMessage("go back", "2026-10-29", draft).changeTarget;
+    expect(at({ guests: 1, amenity: "tennis", date: "2026-10-30", time: 10 })).toBe("time");
+    expect(at({ guests: 1, amenity: "tennis", date: "2026-10-30" })).toBe("day");
+    expect(at({ guests: 1, amenity: "tennis" })).toBe("amenity");
+    expect(at({ guests: 1 })).toBe("amenity");
+    expect(p("Go back.").changeTarget).toBe("amenity");
+  });
+});
+
 describe("interpret", () => {
   test("resolves to parseMessage and never sets reply", async () => {
     const r = await interpret("tennis", { draft: { guests: 1 }, today: "2026-10-29", history: [] });

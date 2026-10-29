@@ -7,5 +7,5 @@ import type { ChatMessage, Draft, ISODate, Interpretation } from "./types";
 export type InterpretContext = { draft: Draft; today: ISODate; history: ChatMessage[] };
 
 export function interpret(text: string, ctx: InterpretContext): Promise<Interpretation> {
-  return Promise.resolve(parseMessage(text, ctx.today));
+  return Promise.resolve(parseMessage(text, ctx.today, ctx.draft));
 }
