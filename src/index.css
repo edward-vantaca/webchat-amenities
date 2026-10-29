@@ -1,0 +1,48 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap');
+
+@import 'tailwindcss';
+
+/* Weight-named DM Sans faces, as referenced by the Figma-exported class names
+   (e.g. font-['DM_Sans:SemiBold',sans-serif]). */
+@font-face {
+  font-family: "DM Sans:Regular";
+  font-style: normal;
+  font-weight: 400;
+  src: url("https://static.figma.com/font/DMSans_opsz_wght__1") format("woff2");
+}
+
+@font-face {
+  font-family: "DM Sans:Medium";
+  font-style: normal;
+  font-weight: 500;
+  src: url("https://static.figma.com/font/DMSans_opsz_wght__1") format("woff2");
+}
+
+@font-face {
+  font-family: "DM Sans:SemiBold";
+  font-style: normal;
+  font-weight: 600;
+  src: url("https://static.figma.com/font/DMSans_opsz_wght__1") format("woff2");
+}
+
+@font-face {
+  font-family: "DM Sans:Bold";
+  font-style: normal;
+  font-weight: 700;
+  src: url("https://static.figma.com/font/DMSans_opsz_wght__1") format("woff2");
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+::-webkit-scrollbar {
+  width: 0px;
+  height: 0px;
+}
