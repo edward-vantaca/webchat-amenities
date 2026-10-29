@@ -1,5 +1,9 @@
-import { useState } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import { History, ChevronRight, Paperclip, ArrowUp, Info, ChevronsRight } from "lucide-react";
+import { COMMON_QUESTIONS, chatReducer, initChat } from "@/booking/chatReducer";
+import { toISODate } from "@/booking/dates";
+import { interpret } from "@/booking/interpret";
+import { WidgetView } from "./widgets/WidgetView";
 
 export function AskHoaiIcon({ className = "" }: { className?: string }) {
   return (
@@ -65,16 +69,32 @@ function AskHoaiWordmark() {
   );
 }
 
-const COMMON_QUESTIONS = [
-  "What is my current account balance?",
-  "How do I submit an architectural modification (ARC) request and track status?",
-  "I received a violation—what is it for and how do I resolve/appeal it?",
-  "What is the process to request a new pool key?",
-];
-
-// Docked on the right of the portal at lg+, in its idle welcome state.
+// Docked on the right of the portal at lg+.
 export default function AskHoaiPanel() {
+  const [state, dispatch] = useReducer(chatReducer, new Date(), initChat);
   const [input, setInput] = useState("");
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const hasConversation = state.messages.length > 0;
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [state.messages.length]);
+
+  function handleSend() {
+    const text = input.trim();
+    if (!text || state.pending) return;
+    dispatch({ type: "userText", text });
+    setInput("");
+    interpret(text, { draft: state.draft, today: toISODate(state.now), history: state.messages }).then(
+      (result) => dispatch({ type: "interpreted", result }),
+      () => dispatch({ type: "interpretFailed" }),
+    );
+  }
+
+  const chatInput = (
+    <ChatInput input={input} onChange={setInput} onSend={handleSend} pending={state.pending} />
+  );
 
   return (
     <aside data-ux-id="askhoai-panel" className="hidden lg:flex w-[400px] shrink-0 h-full">
@@ -100,39 +120,59 @@ export default function AskHoaiPanel() {
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto px-5 pt-6 pb-4">
-          <div data-ash-section="welcome">
-            <h2 className="font-['DM_Sans:Bold',sans-serif] font-bold text-[22px] text-[#262630] leading-tight">
-              Welcome back, Alex Johnson
-            </h2>
-            <p className="text-[13px] text-[#5a5a66] mt-1">How can I help you today?</p>
-          </div>
-
-          {/* Input */}
-          <div data-ash-section="input" className="mt-5 border-2 border-[#247ae4] rounded-xl p-3 bg-white">
-            <ChatInput input={input} onChange={setInput} />
-          </div>
-
-          {/* Common questions */}
-          <div data-ash-section="questions">
-            <p className="text-[11px] font-semibold text-[#8a8a96] tracking-[0.1em] mt-6 mb-3">
-              COMMON QUESTIONS:
-            </p>
-            <div className="flex flex-col gap-2">
-              {COMMON_QUESTIONS.map((q) => (
-                <button
-                  key={q}
-                  type="button"
-                  onClick={() => setInput(q)}
-                  className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg bg-[#f4f6f9] hover:bg-[#e8ecf3] text-left text-[13px] leading-snug text-[#262630]"
-                >
-                  <span className="flex-1">{q}</span>
-                  <ChevronsRight size={14} className="text-[#8a8a96] shrink-0" />
-                </button>
+        {hasConversation ? (
+          <>
+            <div
+              ref={scrollRef}
+              data-ash-section="thread"
+              className="flex-1 overflow-y-auto px-5 pt-6 pb-4 flex flex-col gap-3"
+            >
+              {state.messages.map((m) => (
+                <div key={m.id} className="flex flex-col gap-3">
+                  {m.text && <MessageBubble role={m.role} text={m.text} />}
+                  {m.widget && <WidgetView message={m} state={state} dispatch={dispatch} />}
+                </div>
               ))}
             </div>
+            <div data-ash-section="input" className="mx-5 mb-5 border-2 border-[#247ae4] rounded-xl p-3 bg-white">
+              {chatInput}
+            </div>
+          </>
+        ) : (
+          <div className="flex-1 overflow-y-auto px-5 pt-6 pb-4">
+            <div data-ash-section="welcome">
+              <h2 className="font-['DM_Sans:Bold',sans-serif] font-bold text-[22px] text-[#262630] leading-tight">
+                Welcome back, Alex Johnson
+              </h2>
+              <p className="text-[13px] text-[#5a5a66] mt-1">How can I help you today?</p>
+            </div>
+
+            {/* Input */}
+            <div data-ash-section="input" className="mt-5 border-2 border-[#247ae4] rounded-xl p-3 bg-white">
+              {chatInput}
+            </div>
+
+            {/* Common questions */}
+            <div data-ash-section="questions">
+              <p className="text-[11px] font-semibold text-[#8a8a96] tracking-[0.1em] mt-6 mb-3">
+                COMMON QUESTIONS:
+              </p>
+              <div className="flex flex-col gap-2">
+                {COMMON_QUESTIONS.map((q) => (
+                  <button
+                    key={q}
+                    type="button"
+                    onClick={() => dispatch({ type: "commonQuestion", text: q })}
+                    className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg bg-[#f4f6f9] hover:bg-[#e8ecf3] text-left text-[13px] leading-snug text-[#262630]"
+                  >
+                    <span className="flex-1">{q}</span>
+                    <ChevronsRight size={14} className="text-[#8a8a96] shrink-0" />
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Footer */}
         <div className="px-5 py-3 border-t border-[#e5eaf0]">
@@ -149,12 +189,51 @@ export default function AskHoaiPanel() {
   );
 }
 
-function ChatInput({ input, onChange }: { input: string; onChange: (v: string) => void }) {
+function MessageBubble({ role, text }: { role: "user" | "agent"; text: string }) {
+  if (role === "user") {
+    return (
+      <div className="self-end max-w-[80%]">
+        <div className="bg-[#247ae4] text-white text-[14px] leading-relaxed rounded-2xl rounded-br-md px-4 py-2.5 shadow-sm">
+          {text}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="self-start max-w-[85%] flex items-start gap-2">
+      <div className="shrink-0 w-7 h-7 rounded-full bg-[#f0f4fb] text-[#1D70DC] grid place-items-center">
+        <AskHoaiIcon className="w-4 h-4" />
+      </div>
+      <div className="bg-[#f4f6f9] text-[#262630] text-[14px] leading-relaxed rounded-2xl rounded-bl-md px-4 py-2.5 whitespace-pre-wrap">
+        {text}
+      </div>
+    </div>
+  );
+}
+
+function ChatInput({
+  input,
+  onChange,
+  onSend,
+  pending,
+}: {
+  input: string;
+  onChange: (v: string) => void;
+  onSend: () => void;
+  pending: boolean;
+}) {
   return (
     <>
       <textarea
         value={input}
         onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            onSend();
+          }
+        }}
+        disabled={pending}
         placeholder="Hello! How can I help you today?"
         className="w-full resize-none outline-none text-[14px] placeholder:text-[#9a9aa6] bg-transparent"
         rows={2}
@@ -168,8 +247,9 @@ function ChatInput({ input, onChange }: { input: string; onChange: (v: string) =
         </button>
         <button
           type="button"
+          onClick={onSend}
           className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#247ae4] text-white text-[13px] rounded-full hover:bg-[#1d6fd4] disabled:bg-[#8ab6ec] disabled:opacity-70"
-          disabled={!input.trim()}
+          disabled={!input.trim() || pending}
         >
           <ArrowUp size={13} /> Send
         </button>
