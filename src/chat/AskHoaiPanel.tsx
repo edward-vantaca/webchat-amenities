@@ -74,6 +74,8 @@ export default function AskHoaiPanel() {
   const [state, dispatch] = useReducer(chatReducer, new Date(), initChat);
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const typedTurn = useRef(false);
   const hasConversation = state.messages.length > 0;
 
   useEffect(() => {
@@ -81,9 +83,18 @@ export default function AskHoaiPanel() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [state.messages.length]);
 
+  // Refocus the (disabled-while-pending) textarea once a typed turn finishes; tile taps don't steal focus.
+  useEffect(() => {
+    if (!state.pending && typedTurn.current) {
+      typedTurn.current = false;
+      inputRef.current?.focus();
+    }
+  }, [state.pending]);
+
   function handleSend() {
     const text = input.trim();
     if (!text || state.pending) return;
+    typedTurn.current = true;
     dispatch({ type: "userText", text });
     setInput("");
     interpret(text, { draft: state.draft, today: toISODate(state.now), history: state.messages }).then(
@@ -93,7 +104,7 @@ export default function AskHoaiPanel() {
   }
 
   const chatInput = (
-    <ChatInput input={input} onChange={setInput} onSend={handleSend} pending={state.pending} />
+    <ChatInput inputRef={inputRef} input={input} onChange={setInput} onSend={handleSend} pending={state.pending} />
   );
 
   return (
@@ -212,11 +223,13 @@ function MessageBubble({ role, text }: { role: "user" | "agent"; text: string })
 }
 
 function ChatInput({
+  inputRef,
   input,
   onChange,
   onSend,
   pending,
 }: {
+  inputRef: React.Ref<HTMLTextAreaElement>;
   input: string;
   onChange: (v: string) => void;
   onSend: () => void;
@@ -225,6 +238,7 @@ function ChatInput({
   return (
     <>
       <textarea
+        ref={inputRef}
         value={input}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => {

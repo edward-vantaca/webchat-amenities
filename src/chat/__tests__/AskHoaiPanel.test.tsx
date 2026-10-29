@@ -59,4 +59,19 @@ describe("AskHoaiPanel conversation", () => {
     await user.type(screen.getByRole("textbox"), "hello{Enter}");
     expect(await screen.findByText("Something went wrong, please try again.")).toBeInTheDocument();
   });
+
+  test("textarea regains focus after a typed turn", async () => {
+    const user = userEvent.setup();
+    render(<AskHoaiPanel />);
+    await user.type(screen.getByRole("textbox"), "hello{Enter}");
+    await screen.findByText(/Sorry, I didn't catch that|I can help you reserve/);
+    expect(screen.getByRole("textbox")).toHaveFocus();
+  });
+
+  test("tile tap does not steal focus", async () => {
+    const user = userEvent.setup();
+    render(<AskHoaiPanel />);
+    await user.click(screen.getByRole("button", { name: /Reserve an amenity for me/ }));
+    expect(screen.getByRole("textbox")).not.toHaveFocus();
+  });
 });
