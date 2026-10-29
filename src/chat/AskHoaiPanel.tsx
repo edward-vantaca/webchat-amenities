@@ -2,7 +2,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { History, ChevronRight, Paperclip, ArrowUp, Info, ChevronsRight } from "lucide-react";
 import { COMMON_QUESTIONS, chatReducer, initChat } from "@/booking/chatReducer";
 import { contextFor, interpret } from "@/booking/interpret";
-import type { ChatEvent } from "@/booking/types";
+import type { ChatEvent, ChatMessage } from "@/booking/types";
 import { WidgetView } from "./widgets/WidgetView";
 
 export function AskHoaiIcon({ className = "" }: { className?: string }) {
@@ -69,8 +69,36 @@ function AskHoaiWordmark() {
   );
 }
 
+// How long the agent "types" before a reply appears: longer replies take a little longer.
+export function defaultTypingDelay(text: string): number {
+  return Math.min(500 + text.length * 12, 1400);
+}
+
+// Shows user messages at once but holds each run of agent messages behind a typing indicator.
+// A delay of 0 shows replies immediately.
+function useTypingReveal(messages: ChatMessage[], typingDelay: (text: string) => number) {
+  const [shown, setShown] = useState(0);
+  let visible = shown;
+  while (visible < messages.length && messages[visible].role === "user") visible++;
+  let batchEnd = visible;
+  while (batchEnd < messages.length && messages[batchEnd].role === "agent") batchEnd++;
+  const delay = batchEnd > visible ? typingDelay(messages.slice(visible, batchEnd).map((m) => m.text ?? "").join(" ")) : 0;
+  if (batchEnd > visible && delay <= 0) visible = batchEnd;
+
+  useEffect(() => {
+    if (visible === batchEnd) {
+      if (shown !== visible) setShown(visible);
+      return;
+    }
+    const t = setTimeout(() => setShown(batchEnd), delay);
+    return () => clearTimeout(t);
+  }, [visible, batchEnd, delay, shown]);
+
+  return { visible, typing: visible < messages.length };
+}
+
 // Docked on the right of the portal at lg+.
-export default function AskHoaiPanel() {
+export default function AskHoaiPanel({ typingDelay = defaultTypingDelay }: { typingDelay?: (text: string) => number }) {
   const [state, dispatchRaw] = useReducer(chatReducer, new Date(), initChat);
   // Stamp every event with the current time so "today" follows the real clock, not the mount time.
   const dispatch = useCallback((e: ChatEvent) => dispatchRaw({ ...e, now: new Date() }), []);
@@ -79,23 +107,29 @@ export default function AskHoaiPanel() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const typedTurn = useRef(false);
   const hasConversation = state.messages.length > 0;
+  const { visible, typing } = useTypingReveal(state.messages, typingDelay);
+  const busy = state.pending || typing;
 
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [state.messages.length]);
+    if (!el) return;
+    // Glide to the newest message, unless the visitor asks for reduced motion.
+    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    if (el.scrollTo) el.scrollTo({ top: el.scrollHeight, behavior: reduce ? "auto" : "smooth" });
+    else el.scrollTop = el.scrollHeight;
+  }, [visible, busy]);
 
-  // Refocus the (disabled-while-pending) textarea once a typed turn finishes; tile taps don't steal focus.
+  // Refocus the (disabled-while-busy) textarea once a typed turn's reply is shown; tile taps don't steal focus.
   useEffect(() => {
-    if (!state.pending && typedTurn.current) {
+    if (!busy && typedTurn.current) {
       typedTurn.current = false;
       inputRef.current?.focus();
     }
-  }, [state.pending]);
+  }, [busy]);
 
   function handleSend() {
     const text = input.trim();
-    if (!text || state.pending) return;
+    if (!text || busy) return;
     typedTurn.current = true;
     const turn = state.nextId; // the reducer gives the echoed message this id and awaits this turn
     const ctx = contextFor(state, new Date());
@@ -108,7 +142,7 @@ export default function AskHoaiPanel() {
   }
 
   const chatInput = (
-    <ChatInput inputRef={inputRef} input={input} onChange={setInput} onSend={handleSend} pending={state.pending} />
+    <ChatInput inputRef={inputRef} input={input} onChange={setInput} onSend={handleSend} pending={busy} />
   );
 
   return (
@@ -142,12 +176,22 @@ export default function AskHoaiPanel() {
               data-ash-section="thread"
               className="flex-1 overflow-y-auto px-5 pt-6 pb-4 flex flex-col gap-3"
             >
-              {state.messages.map((m) => (
+              {state.messages.slice(0, visible).map((m) => (
                 <div key={m.id} className="flex flex-col gap-3">
-                  {m.text && <MessageBubble role={m.role} text={m.text} />}
-                  {m.widget && <WidgetView message={m} state={state} dispatch={dispatch} />}
+                  {m.text && (
+                    <div className={m.role === "agent" ? "chat-enter flex flex-col" : "flex flex-col"}>
+                      <MessageBubble role={m.role} text={m.text} />
+                    </div>
+                  )}
+                  {m.widget && (
+                    // The widget follows its reply text a beat later.
+                    <div className="chat-enter" style={m.text ? { animationDelay: "120ms" } : undefined}>
+                      <WidgetView message={m} state={state} dispatch={dispatch} />
+                    </div>
+                  )}
                 </div>
               ))}
+              {busy && <TypingIndicator />}
             </div>
             <div data-ash-section="input" className="mx-5 mb-5 border-2 border-[#247ae4] rounded-xl p-3 bg-white">
               {chatInput}
@@ -221,6 +265,25 @@ function MessageBubble({ role, text }: { role: "user" | "agent"; text: string })
       </div>
       <div className="bg-[#f4f6f9] text-[#262630] text-[14px] leading-relaxed rounded-2xl rounded-bl-md px-4 py-2.5 whitespace-pre-wrap">
         {text}
+      </div>
+    </div>
+  );
+}
+
+function TypingIndicator() {
+  return (
+    <div role="status" aria-label="Ask HOAi is typing" className="chat-enter self-start flex items-start gap-2">
+      <div className="shrink-0 w-7 h-7 rounded-full bg-[#f0f4fb] text-[#1D70DC] grid place-items-center">
+        <AskHoaiIcon className="w-4 h-4" />
+      </div>
+      <div className="bg-[#f4f6f9] rounded-2xl rounded-bl-md px-4 py-3.5 flex items-center gap-1">
+        {[0, 150, 300].map((d) => (
+          <span
+            key={d}
+            style={{ animationDelay: `${d}ms` }}
+            className="w-1.5 h-1.5 rounded-full bg-[#8a8a96] animate-bounce motion-reduce:animate-none"
+          />
+        ))}
       </div>
     </div>
   );

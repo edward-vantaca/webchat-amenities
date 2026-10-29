@@ -60,7 +60,7 @@ This follows home-vision's own `AskHoaiPanel` conversation mode (`../home-vision
 - The message thread fills the scroll area, and the input box (same bordered style) is pinned at the bottom above the "Powered by HOAi" footer.
 - The thread scrolls to the newest message whenever one is added. The scroll is instant, with no animation.
 - Agent message bubbles use the `AskHoaiIcon` avatar and user bubbles are blue and right-aligned, matching home-vision's `MessageBubble`.
-- No typing-dots delay: agent replies appear immediately.
+- Agent replies wait behind a typing indicator (three bouncing dots in an agent bubble) for 0.5–1.4 s depending on reply length; the resident's own messages appear immediately and the input is disabled until the reply shows. (Added after the first build at the user's request; the dots are the one animation in the panel and stop under reduced-motion.)
 
 ### Time slots and booking length
 

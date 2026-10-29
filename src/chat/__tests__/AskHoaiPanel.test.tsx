@@ -28,7 +28,7 @@ afterEach(() => {
 describe("AskHoaiPanel conversation", () => {
   test("reserve question is first and starts the flow", async () => {
     const user = userEvent.setup();
-    render(<AskHoaiPanel />);
+    render(<AskHoaiPanel typingDelay={() => 0} />);
     const qs = screen
       .getAllByRole("button")
       .filter((b) => b.textContent?.includes("?") || b.textContent?.includes("Reserve"));
@@ -40,7 +40,7 @@ describe("AskHoaiPanel conversation", () => {
 
   test("typing a full request reaches the summary", async () => {
     const user = userEvent.setup();
-    render(<AskHoaiPanel />);
+    render(<AskHoaiPanel typingDelay={() => 0} />);
     await user.type(
       screen.getByRole("textbox"),
       `tennis on nov ${Number(OPEN_DAY.slice(8))} at ${formatHour(OPEN_HOUR)}{Enter}`,
@@ -49,7 +49,7 @@ describe("AskHoaiPanel conversation", () => {
   });
 
   test("Enter while an IME is composing does not send", async () => {
-    render(<AskHoaiPanel />);
+    render(<AskHoaiPanel typingDelay={() => 0} />);
     const box = screen.getByRole("textbox");
     fireEvent.change(box, { target: { value: "tennis" } });
     fireEvent.keyDown(box, { key: "Enter", isComposing: true });
@@ -60,7 +60,7 @@ describe("AskHoaiPanel conversation", () => {
 
   test("blank input does not send", async () => {
     const user = userEvent.setup();
-    render(<AskHoaiPanel />);
+    render(<AskHoaiPanel typingDelay={() => 0} />);
     await user.type(screen.getByRole("textbox"), "{Enter}");
     expect(screen.getByText(/Welcome back/)).toBeInTheDocument();
   });
@@ -68,14 +68,14 @@ describe("AskHoaiPanel conversation", () => {
   test("interpret rejection shows the error reply", async () => {
     const user = userEvent.setup();
     vi.mocked(interpret).mockRejectedValueOnce(new Error("boom"));
-    render(<AskHoaiPanel />);
+    render(<AskHoaiPanel typingDelay={() => 0} />);
     await user.type(screen.getByRole("textbox"), "hello{Enter}");
     expect(await screen.findByText("Something went wrong, please try again.")).toBeInTheDocument();
   });
 
   test("textarea regains focus after a typed turn", async () => {
     const user = userEvent.setup();
-    render(<AskHoaiPanel />);
+    render(<AskHoaiPanel typingDelay={() => 0} />);
     await user.type(screen.getByRole("textbox"), "hello{Enter}");
     await screen.findByText(/Sorry, I didn't catch that|I can help you reserve/);
     expect(screen.getByRole("textbox")).toHaveFocus();
@@ -83,7 +83,7 @@ describe("AskHoaiPanel conversation", () => {
 
   test("the reader gets the current day, the newest active widget, and its result is applied (R10)", async () => {
     const user = userEvent.setup();
-    render(<AskHoaiPanel />);
+    render(<AskHoaiPanel typingDelay={() => 0} />);
     await user.click(screen.getByRole("button", { name: /Reserve an amenity for me/ }));
     vi.setSystemTime(new Date(2026, 9, 30, 9, 0)); // the clock moves on after mount
     await user.type(screen.getByRole("textbox"), "tennis{Enter}");
@@ -100,8 +100,32 @@ describe("AskHoaiPanel conversation", () => {
 
   test("tile tap does not steal focus", async () => {
     const user = userEvent.setup();
-    render(<AskHoaiPanel />);
+    render(<AskHoaiPanel typingDelay={() => 0} />);
     await user.click(screen.getByRole("button", { name: /Reserve an amenity for me/ }));
     expect(screen.getByRole("textbox")).not.toHaveFocus();
+  });
+
+  test("a typing indicator shows before the agent's reply, and the input waits for it", async () => {
+    const user = userEvent.setup();
+    render(<AskHoaiPanel typingDelay={() => 300} />);
+    await user.click(screen.getByRole("button", { name: /Reserve an amenity for me/ }));
+    expect(screen.getByText("Reserve an amenity for me")).toBeInTheDocument(); // own message shows at once
+    expect(screen.getByRole("status", { name: "Ask HOAi is typing" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Tennis Court/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox")).toBeDisabled();
+    expect(await screen.findByRole("button", { name: /Tennis Court/ })).toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: "Ask HOAi is typing" })).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox")).toBeEnabled();
+  });
+
+  test("a typed turn's reply also waits behind the indicator, then focus returns", async () => {
+    const user = userEvent.setup();
+    render(<AskHoaiPanel typingDelay={() => 300} />);
+    await user.type(screen.getByRole("textbox"), "tennis{Enter}");
+    expect(screen.getByText("tennis")).toBeInTheDocument();
+    expect(await screen.findByRole("status", { name: "Ask HOAi is typing" })).toBeInTheDocument();
+    expect(screen.queryByText(/Great choice/)).not.toBeInTheDocument();
+    expect(await screen.findByText(/Great choice/)).toBeInTheDocument();
+    expect(screen.getByRole("textbox")).toHaveFocus();
   });
 });

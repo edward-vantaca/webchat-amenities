@@ -46,3 +46,25 @@ body,
   width: 0px;
   height: 0px;
 }
+
+/* Ask HOAi replies ease in as they appear. */
+@keyframes chat-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.chat-enter {
+  animation: chat-enter 260ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-enter {
+    animation: none;
+  }
+}

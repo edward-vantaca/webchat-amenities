@@ -100,23 +100,16 @@ describe("widgets", () => {
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "pickSlot", from: 7 }));
   });
 
-  test("summary stepper dispatches setGuests, Change and Confirm", async () => {
+  test("summary shows no guests row and dispatches Change and Confirm", async () => {
     const { dispatch, user } = setup({ kind: "summary", amenity: "tennis", date: "2026-10-31", time: 10, guests: 2 });
     expect(screen.getByText("Up to 4 guests · free cancellation up to 24 hrs before")).toBeInTheDocument();
     expect(screen.getByText("10:00 – 11:00 AM")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Increase guests" }));
-    expect(dispatch).toHaveBeenCalledWith({ type: "setGuests", guests: 3, from: 7 });
-    await user.click(screen.getByRole("button", { name: "Decrease guests" }));
-    expect(dispatch).toHaveBeenCalledWith({ type: "setGuests", guests: 1, from: 7 });
+    expect(screen.queryByText("Guests")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /guests/ })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Change" }));
     expect(dispatch).toHaveBeenCalledWith({ type: "change", from: 7 });
     await user.click(screen.getByRole("button", { name: "Confirm" }));
     expect(dispatch).toHaveBeenCalledWith({ type: "confirm", from: 7 });
-  });
-
-  test("summary stepper stops at 1 and maxGuests", () => {
-    setup({ kind: "summary", amenity: "tennis", date: "2026-10-31", time: 10, guests: 4 });
-    expect(screen.getByRole("button", { name: "Increase guests" })).toBeDisabled();
   });
 
   test("calendar disables past days and navigates months", async () => {

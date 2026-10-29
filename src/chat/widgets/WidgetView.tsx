@@ -40,7 +40,7 @@ export function WidgetView({
         body = <SlotList amenity={w.amenity} range={w.range} state={state} dispatch={send} />;
         break;
       case "summary":
-        body = <SummaryCard amenity={w.amenity} date={w.date} time={w.time} guests={w.guests} dispatch={send} />;
+        body = <SummaryCard amenity={w.amenity} date={w.date} time={w.time} dispatch={send} />;
         break;
       case "confirmation":
         body = <ConfirmationCard booking={w.booking} />;
