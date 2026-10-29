@@ -46,7 +46,7 @@ export type ChatMessage = { id: number; role: "user" | "agent"; text?: string; w
 export type ChatState = { now: Date; messages: ChatMessage[]; draft: Draft; bookings: Booking[]; pending: boolean; nextId: number };
 
 export type ChatEvent =
-  | { type: "commonQuestion"; text: string }
+  | { type: "commonQuestion"; text: string; from?: number } // `from` is set only when sent from a chip
   | { type: "userText"; text: string }                      // echoes text, sets pending
   | { type: "interpreted"; result: Interpretation }         // clears pending
   | { type: "interpretFailed" }                              // clears pending

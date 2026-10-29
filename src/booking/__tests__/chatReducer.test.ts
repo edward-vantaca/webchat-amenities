@@ -79,8 +79,12 @@ describe("tap path", () => {
   test("other common questions get the canned reply", () => {
     const s = chatReducer(s0, { type: "commonQuestion", text: COMMON_QUESTIONS[1] });
     expect(s.messages[0]).toMatchObject({ role: "user", text: COMMON_QUESTIONS[1] });
-    expect(last(s).text).toBe('I can help you reserve an amenity. Tap "Reserve an amenity for me" to get started.');
-    expect(last(s).widget).toBeUndefined();
+    // R8: no picker is live, so the reply carries the Reserve chip
+    expect(last(s).text).toBe("I can help you reserve an amenity. Tap below to get started.");
+    expect(last(s).widget).toEqual({
+      kind: "chips",
+      chips: [{ label: RESERVE_QUESTION, event: { type: "commonQuestion", text: RESERVE_QUESTION } }],
+    });
   });
 
   test("tap path reaches summary then confirmation", () => {
@@ -385,27 +389,28 @@ describe("typed input", () => {
 
   test("find shows slot list", () => {
     let s = typed(s0, parseMessage("find times next week when the tennis court is available", TODAY));
-    expect(last(s).text).toBe("Here are the open times for Tennis Court:");
-    expect(last(s).widget).toEqual({ kind: "slotList", amenity: "tennis", range: { from: "2026-11-02", to: "2026-11-08" } });
+    expect(s.messages.at(-2)?.text).toBe("Here are the open times for Tennis Court:");
+    expect(s.messages.at(-2)?.widget).toEqual({ kind: "slotList", amenity: "tennis", range: { from: "2026-11-02", to: "2026-11-08" } });
+    expect(activeWidgets(s).map((w) => w.kind)).toEqual(["slotList", "chips"]); // finding 7: back chips
     expect(s.draft.find).toBeFalsy();
-    // tapping a tile in the list fills date + time
+    // tapping a tile in the list fills date + time, echoing the day too
     const [{ date: day, hours: [hour] }] = openSlotsInRange("tennis", { from: "2026-11-02", to: "2026-11-08" }, [], NOW);
-    s = chatReducer(s, { type: "pickSlot", date: day, time: hour, from: last(s).id });
-    expect(s.messages.at(-2)).toMatchObject({ role: "user", text: formatHour(hour) });
+    s = chatReducer(s, { type: "pickSlot", date: day, time: hour, from: activeId(s, "slotList") });
+    expect(s.messages.at(-2)).toMatchObject({ role: "user", text: `${formatDayLong(day)} at ${formatHour(hour)}` });
     expect(last(s).widget).toMatchObject({ kind: "summary", date: day, time: hour });
     expect(s.draft.range).toBeUndefined();
   });
 
   test("find without a range defaults to the next 7 days", () => {
     const s = typed(s0, { intent: "find", slots: { amenity: "tennis" } });
-    expect(last(s).widget).toEqual({ kind: "slotList", amenity: "tennis", range: { from: TODAY, to: "2026-11-04" } });
+    expect(s.messages.at(-2)?.widget).toEqual({ kind: "slotList", amenity: "tennis", range: { from: TODAY, to: "2026-11-04" } });
   });
 
   test("find without an amenity asks for it, then shows the list", () => {
     let s = typed(s0, parseMessage("find times next week", TODAY));
     expect(last(s).widget).toEqual({ kind: "amenities" });
     s = chatReducer(s, { type: "pickAmenity", amenity: "tennis", from: last(s).id });
-    expect(last(s).widget).toEqual({ kind: "slotList", amenity: "tennis", range: { from: "2026-11-02", to: "2026-11-08" } });
+    expect(s.messages.at(-2)?.widget).toEqual({ kind: "slotList", amenity: "tennis", range: { from: "2026-11-02", to: "2026-11-08" } });
   });
 
   test("change amenity clamps guests and drops a full date", () => {
@@ -497,7 +502,7 @@ describe("typed input", () => {
   test("off topic gets the canned reply and keeps the picker live", () => {
     let s = chatReducer(s0, { type: "commonQuestion", text: RESERVE_QUESTION });
     s = typed(s, parseMessage("what is my balance", TODAY));
-    expect(last(s).text).toBe('I can help you reserve an amenity. Tap "Reserve an amenity for me" to get started.');
+    expect(last(s).text).toBe("I can help you reserve an amenity. Tap below to get started.");
     expect(activeWidgets(s)).toEqual([{ kind: "amenities" }]);
   });
 

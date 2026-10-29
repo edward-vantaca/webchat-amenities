@@ -1,8 +1,9 @@
 import { getAmenity } from "./amenities";
-import { hasOpenSlot, slotsFor } from "./availability";
+import { hasOpenSlot, openSlotsInRange, slotsFor } from "./availability";
 import { addDays, formatDayLong, formatHour, lastBookable, toISODate } from "./dates";
 import type {
-  AmenityId, Booking, ChatEvent, ChatMessage, ChatState, Chip, DateRange, Draft, Interpretation, ISODate, Widget,
+  AmenityId, Booking, ChangeTarget, ChatEvent, ChatMessage, ChatState, Chip, DateRange, Draft, Interpretation, ISODate,
+  Widget,
 } from "./types";
 
 export const RESERVE_QUESTION = "Reserve an amenity for me";
@@ -17,7 +18,9 @@ export const COMMON_QUESTIONS: string[] = [
 const NOT_UNDERSTOOD = "Sorry, I didn't catch that. You can pick from the options below.";
 const OUT_OF_WINDOW = "I can only book up to 60 days ahead.";
 const ERROR_REPLY = "Something went wrong, please try again.";
-const OFF_TOPIC = 'I can help you reserve an amenity. Tap "Reserve an amenity for me" to get started.';
+const OFF_TOPIC = "I can help you reserve an amenity. Tap below to get started.";
+const WELCOME = "You're welcome!";
+const DAY_AGAIN = "Which day would you like instead?";
 
 export function initChat(now: Date): ChatState {
   return { now, messages: [], draft: { guests: 1 }, bookings: [], pending: false, nextId: 1 };
@@ -53,12 +56,35 @@ function clampGuests(guests: number, amenity?: AmenityId): number {
   return Math.min(Math.max(1, Math.round(guests)), max);
 }
 
+// What `back` (a chip, or a typed "change the time" / "go back") drops from the draft.
+// Every step back also clears a typed morning/afternoon/evening filter.
+function backDraft(draft: Draft, to: ChangeTarget): Draft {
+  if (to === "time") return without(draft, "time", "timeOfDay");
+  if (to === "day") return without(draft, "date", "time", "range", "find", "timeOfDay");
+  return without(draft, "amenity", "timeOfDay");
+}
+
+// Pickers the resident can still use. A confirmation card or reservation list is informational only.
+const isPicker = (m: ChatMessage) =>
+  m.active && m.widget !== undefined && m.widget.kind !== "confirmation" && m.widget.kind !== "reservations";
+
 const today = (state: ChatState) => toISODate(state.now);
 const monthOf = (date: ISODate) => `${date.slice(0, 8)}01`;
 
 // ---- advance: the prompt for the first missing piece ----
 
-type PromptOptions = { ambiguous?: boolean; notes?: string[]; reply?: string };
+type PromptOptions = { ambiguous?: boolean; notes?: string[]; reply?: string; dayAgain?: boolean };
+
+const backChips = (): NewMessage => ({
+  role: "agent",
+  widget: {
+    kind: "chips",
+    chips: [
+      chip("← Pick a different day", { type: "back", to: "day", from: 0 }),
+      chip("Change amenity", { type: "back", to: "amenity", from: 0 }),
+    ],
+  },
+});
 
 function dayStrip(draft: Draft, todayISO: ISODate): Widget {
   if (draft.range) {
@@ -83,14 +109,22 @@ function prompt(state: ChatState, draft: Draft, opts: PromptOptions): { draft: D
   const a = getAmenity(draft.amenity);
 
   if (draft.find && draft.range) {
+    const { range } = draft;
+    if (openSlotsInRange(a.id, range, state.bookings, state.now).length === 0) {
+      const d = without(draft, "find", "range");
+      const text = `${a.name} has no open times between ${formatDayLong(range.from)} and ${formatDayLong(range.to)}.`;
+      return say(d, text, dayStrip(d, todayISO));
+    }
     return say(without(draft, "find"), `Here are the open times for ${a.name}:`, {
-      kind: "slotList", amenity: a.id, range: draft.range,
-    });
+      kind: "slotList", amenity: a.id, range,
+    }, [backChips()]);
   }
   if (!draft.date) {
     const text = draft.range
       ? "What day works for you?"
-      : "Great choice. What day works for you? Tap a day or type one, like “Saturday”.";
+      : opts.dayAgain
+        ? DAY_AGAIN
+        : "Great choice. What day works for you? Tap a day or type one, like “Saturday”.";
     return say(draft, text, dayStrip(draft, todayISO));
   }
   if (!hasOpenSlot(a.id, draft.date, state.bookings, state.now)) {
@@ -108,17 +142,8 @@ function prompt(state: ChatState, draft: Draft, opts: PromptOptions): { draft: D
     const widget: Widget = filtered
       ? { kind: "slots", amenity: a.id, date: d.date!, timeOfDay }
       : { kind: "slots", amenity: a.id, date: d.date! };
-    const backChips: NewMessage = {
-      role: "agent",
-      widget: {
-        kind: "chips",
-        chips: [
-          chip("← Pick a different day", { type: "back", to: "day", from: 0 }),
-          chip("Change amenity", { type: "back", to: "amenity", from: 0 }),
-        ],
-      },
-    };
-    return say(d, `Here are the open ${a.hours}-hour slots for the ${a.name} on ${formatDayLong(d.date!)}:`, widget, [backChips]);
+    const label = filtered ? `${timeOfDay} ${a.hours}-hour` : `${a.hours}-hour`;
+    return say(d, `Here are the open ${label} slots for the ${a.name} on ${formatDayLong(d.date!)}:`, widget, [backChips()]);
   }
 
   return say(draft, "Here's your reservation. Does this look right?", {
@@ -132,9 +157,10 @@ function advance(state: ChatState, draft: Draft, opts: PromptOptions = {}): Chat
   return append({ ...state, draft: next.draft }, next.messages);
 }
 
-// Not understood / error: say so and re-show copies of the live picker (and its chips).
+// Not understood / error / thanks: say so and re-show copies of the live picker (and its chips).
+// A confirmation card or reservation list is never copied.
 function reshow(state: ChatState, text: string): ChatState {
-  const live = state.messages.filter((m) => m.active && m.widget);
+  const live = state.messages.filter(isPicker);
   if (live.length === 0) return advance(startTurn(state), state.draft, { reply: text });
   const copies = live.map((m, i): NewMessage => {
     const copyText = i === 0 ? text : m.text;
@@ -180,6 +206,14 @@ function listReservations(state: ChatState, reply?: string): ChatState {
   ]);
 }
 
+// Off-topic: keep a live picker live; with none, offer the Reserve chip so it is never a dead end (R8).
+function offTopic(state: ChatState, text: string, echo?: string): ChatState {
+  const echoed: NewMessage[] = echo === undefined ? [] : [{ role: "user", text: echo }];
+  if (state.messages.some(isPicker)) return append(state, [...echoed, { role: "agent", text }]);
+  const reserve = chip(RESERVE_QUESTION, { type: "commonQuestion", text: RESERVE_QUESTION });
+  return append(startTurn(state, echo), [{ role: "agent", text, widget: { kind: "chips", chips: [reserve] } }]);
+}
+
 // ---- typed input ----
 
 function onInterpreted(state: ChatState, r: Interpretation): ChatState {
@@ -188,7 +222,9 @@ function onInterpreted(state: ChatState, r: Interpretation): ChatState {
     case "unknown":
       return reshow(state, r.reply ?? NOT_UNDERSTOOD);
     case "offTopic":
-      return append(state, [{ role: "agent", text: r.reply ?? OFF_TOPIC }]);
+      return offTopic(state, r.reply ?? OFF_TOPIC);
+    case "thanks":
+      return reshow(state, r.reply ?? WELCOME);
     case "listReservations":
       return listReservations(state, r.reply);
     case "confirm": {
@@ -198,7 +234,10 @@ function onInterpreted(state: ChatState, r: Interpretation): ChatState {
   }
 
   const s = r.slots;
-  let d: Draft = r.intent === "changeDay" ? without(state.draft, "time") : { ...state.draft };
+  let d: Draft =
+    r.changeTarget ? backDraft(state.draft, r.changeTarget)
+    : r.intent === "changeDay" ? without(state.draft, "time")
+    : { ...state.draft };
   if (s.amenity) d.amenity = s.amenity;
   if (s.date) d = { ...without(d, "range"), date: s.date };
   if (s.time !== undefined) d.time = s.time;
@@ -211,13 +250,23 @@ function onInterpreted(state: ChatState, r: Interpretation): ChatState {
   }
   d.guests = clampGuests(d.guests, d.amenity);
 
+  const notes: string[] = [];
+  if (r.snappedFrom && s.time !== undefined) notes.push(`The closest start is ${formatHour(s.time)}.`);
+  if (s.guests !== undefined && d.guests < s.guests) {
+    notes.push(`The ${getAmenity(d.amenity!).name} allows up to ${d.guests} guests, so I've set it to ${d.guests}.`);
+  }
+
   if (r.outOfWindow) {
     d = without(d, "date", "time", "range", "find");
     return advance(startTurn(state), d, { reply: r.reply ?? OUT_OF_WINDOW });
   }
 
-  const notes = r.snappedFrom && s.time !== undefined ? [`The closest start is ${formatHour(s.time)}.`] : [];
-  return advance(startTurn(state), d, { ambiguous: r.ambiguous === "court" && !s.amenity, notes, reply: r.reply });
+  return advance(startTurn(state), d, {
+    ambiguous: r.ambiguous === "court" && !d.amenity,
+    notes,
+    reply: r.reply,
+    dayAgain: r.changeTarget === "day",
+  });
 }
 
 // ---- taps ----
@@ -251,7 +300,7 @@ function onTap(state: ChatState, event: TapEvent, source: ChatMessage): ChatStat
       return advance(startTurn(state, getAmenity(event.amenity).name), d);
     }
     case "pickDate": {
-      const d = { ...without(draft, "range", "find"), date: event.date }; // keeps a typed time (R6)
+      const d = { ...without(draft, "range", "find", "timeOfDay"), date: event.date }; // keeps a typed time (R6)
       return advance(startTurn(state, formatDayLong(event.date)), d);
     }
     case "openCalendar": {
@@ -268,7 +317,8 @@ function onTap(state: ChatState, event: TapEvent, source: ChatMessage): ChatStat
     }
     case "pickSlot": {
       const d = { ...without(draft, "range", "find"), date: event.date, time: event.time };
-      return advance(startTurn(state, formatHour(event.time)), d);
+      const echo = source.widget?.kind === "slotList" ? `${formatDayLong(event.date)} at ${formatHour(event.time)}` : formatHour(event.time);
+      return advance(startTurn(state, echo), d);
     }
     case "setGuests": {
       if (source.widget?.kind !== "summary") return state;
@@ -293,12 +343,8 @@ function onTap(state: ChatState, event: TapEvent, source: ChatMessage): ChatStat
         },
       }]);
     case "back": {
-      const d =
-        event.to === "time" ? without(draft, "time")
-        : event.to === "day" ? without(draft, "date", "time", "range", "find")
-        : without(draft, "amenity");
       const label = chipLabel(source, (e) => e.type === "back" && e.to === event.to, BACK_LABELS[event.to]);
-      return advance(startTurn(state, label), d);
+      return advance(startTurn(state, label), backDraft(draft, event.to), { dayAgain: event.to === "day" });
     }
     case "bookAnother": {
       const label = chipLabel(source, (e) => e.type === "bookAnother", "Book another amenity");
@@ -316,8 +362,13 @@ function onTap(state: ChatState, event: TapEvent, source: ChatMessage): ChatStat
 export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
   switch (event.type) {
     case "commonQuestion": {
+      // From the welcome list there is no `from`; from a chip, the chips message must still be active.
+      if (event.from !== undefined) {
+        const source = state.messages.find((m) => m.id === event.from && m.active);
+        if (source?.widget?.kind !== "chips") return state;
+      }
       if (event.text === RESERVE_QUESTION) return advance(startTurn(state, event.text), state.draft);
-      return append(state, [{ role: "user", text: event.text }, { role: "agent", text: OFF_TOPIC }]);
+      return offTopic(state, OFF_TOPIC, event.text);
     }
     case "userText":
       return { ...append(state, [{ role: "user", text: event.text }]), pending: true };

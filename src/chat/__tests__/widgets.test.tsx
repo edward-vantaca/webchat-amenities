@@ -159,6 +159,17 @@ describe("widgets", () => {
     expect(dispatch).toHaveBeenCalledWith({ type: "bookAnother", from: 7 });
   });
 
+  test("a commonQuestion chip keeps its text and gains the message id (R8)", async () => {
+    const event = { type: "commonQuestion" as const, text: "Reserve an amenity for me" };
+    const { dispatch, user } = setup({ kind: "chips", chips: [{ label: "Reserve an amenity for me", event }] });
+    await user.click(screen.getByRole("button", { name: "Reserve an amenity for me" }));
+    expect(dispatch).toHaveBeenCalledWith({ ...event, from: 7 });
+    // and the reducer accepts it from an active chips message
+    const s = chatReducer(base, { type: "commonQuestion", text: "What is my current account balance?" });
+    const chipMsg = s.messages.at(-1)!;
+    expect(chatReducer(s, { ...event, from: chipMsg.id }).messages.at(-1)?.widget).toEqual({ kind: "amenities" });
+  });
+
   test("state reducer integration: summary from a real state", () => {
     const s = chatReducer(base, { type: "commonQuestion", text: "Reserve an amenity for me" });
     expect(s.messages.some((m) => m.widget?.kind === "amenities")).toBe(true);
