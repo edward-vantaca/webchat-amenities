@@ -49,7 +49,7 @@ function toSummary(): ChatState {
 }
 
 function typed(s: ChatState, result: Interpretation): ChatState {
-  return run(s, { type: "userText", text: "typed" }, { type: "interpreted", result });
+  return run(s, { type: "userText", text: "typed" }, { type: "interpreted", result, turn: s.nextId });
 }
 
 describe("initChat and constants", () => {
@@ -354,7 +354,7 @@ describe("typed input", () => {
   test("typed everything jumps to summary", () => {
     let s = chatReducer(s0, { type: "userText", text: "x" });
     expect(s.pending).toBe(true);
-    s = chatReducer(s, { type: "interpreted", result: { intent: "book", slots: { amenity: "tennis", date: OPEN_DAY, time: OPEN_HOUR } } });
+    s = chatReducer(s, { type: "interpreted", result: { intent: "book", slots: { amenity: "tennis", date: OPEN_DAY, time: OPEN_HOUR } }, turn: 1 });
     expect(s.pending).toBe(false);
     expect(last(s).widget?.kind).toBe("summary");
   });
@@ -556,8 +556,9 @@ describe("typed input", () => {
   test("interpretFailed shows error and re-shows picker", () => {
     let s = chatReducer(s0, { type: "commonQuestion", text: RESERVE_QUESTION });
     s = chatReducer(s, { type: "pickAmenity", amenity: "tennis", from: last(s).id });
+    const turn = s.nextId;
     s = chatReducer(s, { type: "userText", text: "saturday" });
-    s = chatReducer(s, { type: "interpretFailed" });
+    s = chatReducer(s, { type: "interpretFailed", turn });
     expect(s.pending).toBe(false);
     expect(last(s).text).toBe("Something went wrong, please try again.");
     expect(last(s).widget).toEqual({ kind: "days", from: TODAY, count: 14 });

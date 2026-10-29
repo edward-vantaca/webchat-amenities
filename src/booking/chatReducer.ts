@@ -100,7 +100,8 @@ function prompt(state: ChatState, draft: Draft, opts: PromptOptions): { draft: D
   const notes = [...(opts.notes ?? [])];
   const say = (d: Draft, text: string, widget: Widget, extra: NewMessage[] = []) => ({
     draft: d,
-    messages: [{ role: "agent" as const, text: opts.reply ?? [...notes, text].join(" "), widget }, ...extra],
+    // A reader's reply replaces the built-in wording, but the reducer's own notices stay in front.
+    messages: [{ role: "agent" as const, text: [...notes, opts.reply ?? text].join(" "), widget }, ...extra],
   });
   const todayISO = today(state);
 
@@ -129,7 +130,8 @@ function prompt(state: ChatState, draft: Draft, opts: PromptOptions): { draft: D
   }
   if (!hasOpenSlot(a.id, draft.date, state.bookings, state.now)) {
     const d = without(draft, "date", "time");
-    return say(d, `${a.name} is fully booked on ${formatDayLong(draft.date)}. Please pick another day.`, dayStrip(d, todayISO));
+    notes.push(`${a.name} is fully booked on ${formatDayLong(draft.date)}.`);
+    return say(d, "Please pick another day.", dayStrip(d, todayISO));
   }
 
   const slots = slotsFor(a.id, draft.date, state.bookings, state.now);
@@ -258,7 +260,7 @@ function onInterpreted(state: ChatState, r: Interpretation): ChatState {
 
   if (r.outOfWindow) {
     d = without(d, "date", "time", "range", "find");
-    return advance(startTurn(state), d, { reply: r.reply ?? OUT_OF_WINDOW });
+    return advance(startTurn(state), d, { notes, reply: r.reply ?? OUT_OF_WINDOW });
   }
 
   return advance(startTurn(state), d, {
@@ -359,7 +361,14 @@ function onTap(state: ChatState, event: TapEvent, source: ChatMessage): ChatStat
 
 // ---- reducer ----
 
+// The event's `now` (when present) moves the clock first. An ignored event returns `state` itself.
 export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
+  const stamped = event.now ? { ...state, now: event.now } : state;
+  const next = reduce(stamped, event);
+  return next === stamped ? state : next;
+}
+
+function reduce(state: ChatState, event: ChatEvent): ChatState {
   switch (event.type) {
     case "commonQuestion": {
       // From the welcome list there is no `from`; from a chip, the chips message must still be active.
@@ -371,11 +380,13 @@ export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
       return offTopic(state, OFF_TOPIC, event.text);
     }
     case "userText":
-      return { ...append(state, [{ role: "user", text: event.text }]), pending: true };
+      return { ...append(state, [{ role: "user", text: event.text }]), pending: true, pendingTurn: state.nextId };
     case "interpreted":
-      return onInterpreted({ ...state, pending: false }, event.result);
+      if (event.turn !== state.pendingTurn) return state;
+      return onInterpreted({ ...state, pending: false, pendingTurn: undefined }, event.result);
     case "interpretFailed":
-      return reshow({ ...state, pending: false }, ERROR_REPLY);
+      if (event.turn !== state.pendingTurn) return state;
+      return reshow({ ...state, pending: false, pendingTurn: undefined }, ERROR_REPLY);
   }
   const source = state.messages.find((m) => m.id === event.from && m.active);
   if (!source?.widget || !SOURCE_KINDS[event.type].includes(source.widget.kind)) return state;

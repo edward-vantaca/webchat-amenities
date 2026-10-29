@@ -1,8 +1,8 @@
-import { useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { History, ChevronRight, Paperclip, ArrowUp, Info, ChevronsRight } from "lucide-react";
 import { COMMON_QUESTIONS, chatReducer, initChat } from "@/booking/chatReducer";
-import { toISODate } from "@/booking/dates";
-import { interpret } from "@/booking/interpret";
+import { contextFor, interpret } from "@/booking/interpret";
+import type { ChatEvent } from "@/booking/types";
 import { WidgetView } from "./widgets/WidgetView";
 
 export function AskHoaiIcon({ className = "" }: { className?: string }) {
@@ -71,7 +71,9 @@ function AskHoaiWordmark() {
 
 // Docked on the right of the portal at lg+.
 export default function AskHoaiPanel() {
-  const [state, dispatch] = useReducer(chatReducer, new Date(), initChat);
+  const [state, dispatchRaw] = useReducer(chatReducer, new Date(), initChat);
+  // Stamp every event with the current time so "today" follows the real clock, not the mount time.
+  const dispatch = useCallback((e: ChatEvent) => dispatchRaw({ ...e, now: new Date() }), []);
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -95,11 +97,13 @@ export default function AskHoaiPanel() {
     const text = input.trim();
     if (!text || state.pending) return;
     typedTurn.current = true;
+    const turn = state.nextId; // the reducer gives the echoed message this id and awaits this turn
+    const ctx = contextFor(state, new Date());
     dispatch({ type: "userText", text });
     setInput("");
-    interpret(text, { draft: state.draft, today: toISODate(state.now), history: state.messages }).then(
-      (result) => dispatch({ type: "interpreted", result }),
-      () => dispatch({ type: "interpretFailed" }),
+    interpret(text, ctx).then(
+      (result) => dispatch({ type: "interpreted", result, turn }),
+      () => dispatch({ type: "interpretFailed", turn }),
     );
   }
 

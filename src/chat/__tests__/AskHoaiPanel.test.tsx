@@ -68,6 +68,23 @@ describe("AskHoaiPanel conversation", () => {
     expect(screen.getByRole("textbox")).toHaveFocus();
   });
 
+  test("the reader gets the current day, the newest active widget, and its result is applied (R10)", async () => {
+    const user = userEvent.setup();
+    render(<AskHoaiPanel />);
+    await user.click(screen.getByRole("button", { name: /Reserve an amenity for me/ }));
+    vi.setSystemTime(new Date(2026, 9, 30, 9, 0)); // the clock moves on after mount
+    await user.type(screen.getByRole("textbox"), "tennis{Enter}");
+    expect(vi.mocked(interpret)).toHaveBeenLastCalledWith(
+      "tennis",
+      expect.objectContaining({ today: "2026-10-30", activeWidget: "amenities" }),
+    );
+    // the day strip starts at the new today (Fri, Oct 30), not the mount day
+    const strip = await screen.findByText(/Great choice/);
+    expect(strip).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Thursday, Oct 29" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Friday, Oct 30" })).toBeInTheDocument();
+  });
+
   test("tile tap does not steal focus", async () => {
     const user = userEvent.setup();
     render(<AskHoaiPanel />);

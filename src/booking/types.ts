@@ -43,13 +43,16 @@ export type Widget =
   | { kind: "reservations"; bookings: Booking[] }
   | { kind: "chips"; chips: Chip[] };
 export type ChatMessage = { id: number; role: "user" | "agent"; text?: string; widget?: Widget; active: boolean };
-export type ChatState = { now: Date; messages: ChatMessage[]; draft: Draft; bookings: Booking[]; pending: boolean; nextId: number };
+export type ChatState = {
+  now: Date; messages: ChatMessage[]; draft: Draft; bookings: Booking[]; pending: boolean; nextId: number;
+  pendingTurn?: number; // id of the user message whose reader result is awaited
+};
 
-export type ChatEvent =
+type BaseEvent =
   | { type: "commonQuestion"; text: string; from?: number } // `from` is set only when sent from a chip
-  | { type: "userText"; text: string }                      // echoes text, sets pending
-  | { type: "interpreted"; result: Interpretation }         // clears pending
-  | { type: "interpretFailed" }                              // clears pending
+  | { type: "userText"; text: string }                      // echoes text, sets pending; turn = the echo's id
+  | { type: "interpreted"; result: Interpretation; turn: number } // ignored unless turn === pendingTurn
+  | { type: "interpretFailed"; turn: number }                // ignored unless turn === pendingTurn
   | { type: "pickAmenity"; amenity: AmenityId; from: number } // `from` = id of the widget message tapped
   | { type: "pickDate"; date: ISODate; from: number }
   | { type: "openCalendar"; from: number }
@@ -61,3 +64,5 @@ export type ChatEvent =
   | { type: "back"; to: ChangeTarget; from: number }
   | { type: "bookAnother"; from: number }
   | { type: "listReservations"; from: number };
+// `now` (optional): the time the event happened. The reducer moves its clock to it, so "today" never goes stale.
+export type ChatEvent = BaseEvent & { now?: Date };

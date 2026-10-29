@@ -5,6 +5,7 @@ import { COMMON_QUESTIONS, RESERVE_QUESTION, chatReducer, initChat } from "../ch
 import { addDays, formatDayLong, formatHour, toISODate } from "../dates";
 import { hasOpenSlot, openSlotsInRange, slotsFor } from "../availability";
 import { parseMessage } from "../rulesReader";
+import { contextFor } from "../interpret";
 import type { AmenityId, ChatEvent, ChatState, ISODate, TimeOfDay, Widget } from "../types";
 
 const NOW = new Date(2026, 9, 29, 9, 0);
@@ -21,8 +22,9 @@ const widgetsOf = (s: ChatState, kind: Widget["kind"]) => s.messages.filter((m) 
 
 function say(s: ChatState, text: string): ChatState {
   const today = toISODate(s.now);
+  const turn = s.nextId;
   s = chatReducer(s, { type: "userText", text });
-  return chatReducer(s, { type: "interpreted", result: parseMessage(text, today, s.draft) });
+  return chatReducer(s, { type: "interpreted", result: parseMessage(text, today, s.draft), turn });
 }
 
 // Taps the newest active widget of `kind` (default: the newest active widget of any kind).
@@ -290,5 +292,65 @@ describe("guest clamp", () => {
     const s = say(initChat(NOW), `tennis ${typedDay(OPEN_DAY)} for 9 people`);
     expect(lastAgentText(s)?.startsWith("The Tennis Court allows up to 4 guests, so I've set it to 4.")).toBe(true);
     expect(s.draft.guests).toBe(4);
+  });
+});
+
+// ---- R10: swap point ----
+
+describe("swap point (R10)", () => {
+  test("a result for an old turn is ignored; the matching one is applied once", () => {
+    let s = chatReducer(initChat(NOW), { type: "commonQuestion", text: RESERVE_QUESTION });
+    const turn = s.nextId;
+    s = chatReducer(s, { type: "userText", text: "tennis" });
+    expect(s.pendingTurn).toBe(turn);
+    const result = parseMessage("tennis", TODAY);
+    const before = s;
+    expect(chatReducer(before, { type: "interpreted", result, turn: turn - 1 })).toBe(before);
+    expect(chatReducer(before, { type: "interpretFailed", turn: turn + 1 })).toBe(before);
+    s = chatReducer(before, { type: "interpreted", result, turn });
+    expect(s.pending).toBe(false);
+    expect(s.draft.amenity).toBe("tennis");
+    expect(chatReducer(s, { type: "interpreted", result: parseMessage("pickleball", TODAY), turn })).toBe(s);
+    expect(chatReducer(s, { type: "interpretFailed", turn })).toBe(s);
+  });
+
+  test("the reader's reply keeps the reducer's own notices in front", () => {
+    const run = (s: ChatState, text: string, reply: string) => {
+      const turn = s.nextId;
+      s = chatReducer(s, { type: "userText", text });
+      return chatReducer(s, { type: "interpreted", result: { ...parseMessage(text, TODAY), reply }, turn });
+    };
+    // taken hour
+    const D = dayWith((d) => slotsFor("tennis", d, [], NOW).some((x) => !x.open) && hasOpenSlot("tennis", d, [], NOW));
+    const taken = slotsFor("tennis", D, [], NOW).find((x) => !x.open)!.hour;
+    let s = run(initChat(NOW), `tennis ${typedDay(D)} at ${formatHour(taken).replace(":00", "")}`, "Here you go.");
+    expect(lastAgentText(s)).toBe(`${formatHour(taken)} isn't available. Here you go.`);
+    // fully booked
+    const full = dayWith((d) => !hasOpenSlot("tennis", d, [], NOW));
+    s = run(initChat(NOW), `tennis ${typedDay(full)}`, "Pick again?");
+    expect(lastAgentText(s)).toBe(`Tennis Court is fully booked on ${formatDayLong(full)}. Pick again?`);
+    // closest start + guests clamped
+    s = run(initChat(NOW), `tennis ${typedDay(OPEN_DAY)} for 9 people at ${OPEN_HOUR > 12 ? OPEN_HOUR - 12 : OPEN_HOUR}:30 ${OPEN_HOUR >= 12 ? "pm" : "am"}`, "Okay.");
+    expect(lastAgentText(s)).toBe(
+      `The closest start is ${formatHour(OPEN_HOUR)}. The Tennis Court allows up to 4 guests, so I've set it to 4. Okay.`,
+    );
+  });
+
+  test("the context names the newest active widget", () => {
+    let s = say(initChat(NOW), `tennis ${typedDay(OPEN_DAY)}`);
+    expect(contextFor(s, NOW)).toEqual({ draft: s.draft, today: TODAY, history: s.messages, activeWidget: "chips" });
+    s = tap(s, { type: "pickSlot", date: OPEN_DAY, time: OPEN_HOUR }, "slots");
+    expect(contextFor(s, NOW).activeWidget).toBe("summary");
+    expect(contextFor(initChat(NOW), NOW).activeWidget).toBeUndefined();
+  });
+
+  test("an event's now moves the clock", () => {
+    const tomorrow = new Date(2026, 9, 30, 8, 0);
+    let s = chatReducer(initChat(NOW), { type: "commonQuestion", text: RESERVE_QUESTION, now: tomorrow });
+    s = chatReducer(s, { type: "pickAmenity", amenity: "tennis", from: last(s).id, now: tomorrow });
+    expect(s.now).toBe(tomorrow);
+    expect(last(s).widget).toEqual({ kind: "days", from: "2026-10-30", count: 14 });
+    // an ignored event changes nothing, clock included
+    expect(chatReducer(s, { type: "confirm", from: 9999, now: new Date(2026, 10, 5) })).toBe(s);
   });
 });
