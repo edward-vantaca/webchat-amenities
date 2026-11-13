@@ -7,13 +7,12 @@ const p = (t: string) => parseMessage(t, "2026-10-29");
 describe("parseMessage", () => {
   test("amenity only", () => expect(p("I want to book the tennis court")).toMatchObject({ intent: "book", slots: { amenity: "tennis" } }));
   test("everything at once", () =>
-    expect(p("Saturday at 10am for tennis")).toMatchObject({ intent: "book", slots: { amenity: "tennis", date: "2026-10-31", time: 10 } }));
+    expect(p("Saturday at 10am for tennis")).toMatchObject({ intent: "book", slots: { amenity: "tennis", date: "2026-10-31", time: 600 } }));
   test("bare hours", () => {
-    expect(p("saturday at 3").slots.time).toBe(15);
-    expect(p("saturday at 9").slots.time).toBe(9);
-    expect(p("at noon").slots.time).toBe(12);
+    expect(p("saturday at 3").slots.time).toBe(900);
+    expect(p("saturday at 9").slots.time).toBe(540);
+    expect(p("at noon").slots.time).toBe(720);
   });
-  test("snap half hours", () => expect(p("10:30 am")).toMatchObject({ slots: { time: 10 }, snappedFrom: "10:30 am" }));
   test("next week range", () => expect(p("next week").range).toEqual({ from: "2026-11-02", to: "2026-11-08" }));
   test("find", () =>
     expect(p("find times next week when the tennis court is available")).toMatchObject({
@@ -69,14 +68,13 @@ describe("final review fixes", () => {
   });
   test("singular reservation lists", () => expect(p("show my reservation").intent).toBe("listReservations"));
   test("a bare hour as the whole message is a time (R9)", () => {
-    expect(p("10").slots.time).toBe(10);
-    expect(p("3").slots.time).toBe(15);
-    expect(p("6").slots.time).toBe(18);
-    expect(p("7").slots.time).toBe(7);
-    expect(p("12").slots.time).toBe(12);
-    expect(p("10:30")).toMatchObject({ intent: "book", slots: { time: 10 }, snappedFrom: "10:30" });
-    expect(p("2:00").slots.time).toBe(14);
-    expect(p("4 pm").slots.time).toBe(16);
+    expect(p("10").slots.time).toBe(600);
+    expect(p("3").slots.time).toBe(900);
+    expect(p("6").slots.time).toBe(1080);
+    expect(p("7").slots.time).toBe(420);
+    expect(p("12").slots.time).toBe(720);
+    expect(p("2:00").slots.time).toBe(840);
+    expect(p("4 pm").slots.time).toBe(960);
     expect(p("tennis 10").slots.time).toBeUndefined();
   });
   test("change/back targets (R9)", () => {
@@ -91,12 +89,55 @@ describe("final review fixes", () => {
   });
   test("bare go back means the most recent step", () => {
     const at = (draft: Parameters<typeof parseMessage>[2]) => parseMessage("go back", "2026-10-29", draft).changeTarget;
-    expect(at({ guests: 1, amenity: "tennis", date: "2026-10-30", time: 10 })).toBe("time");
+    expect(at({ guests: 1, amenity: "tennis", date: "2026-10-30", time: 600 })).toBe("time");
     expect(at({ guests: 1, amenity: "tennis", date: "2026-10-30" })).toBe("day");
     expect(at({ guests: 1, amenity: "tennis" })).toBe("amenity");
     expect(at({ guests: 1 })).toBe("amenity");
     expect(p("Go back.").changeTarget).toBe("amenity");
   });
+});
+
+describe("booking length", () => {
+  test("times are minutes; half-hours are exact", () => {
+    expect(p("10:30 am")).toEqual({ intent: "book", slots: { time: 630 } });
+    expect(p("10:30")).toEqual({ intent: "book", slots: { time: 630 } });
+  });
+  test("other minutes snap down to the half-hour", () => {
+    expect(p("10:15 am")).toMatchObject({ slots: { time: 600 }, snappedFrom: "10:15 am" });
+    expect(p("at 2:45")).toMatchObject({ slots: { time: 870 }, snappedFrom: "at 2:45" });
+  });
+  test("lengths", () => {
+    const len = (t: string) => p(t).slots.minutes;
+    expect(len("for 90 minutes")).toBe(90);
+    expect(len("90 mins")).toBe(90);
+    expect(len("for 2 hours")).toBe(120);
+    expect(len("2 hrs")).toBe(120);
+    expect(len("1.5 hours")).toBe(90);
+    expect(len("an hour")).toBe(60);
+    expect(len("half an hour")).toBe(30);
+    expect(len("an hour and a half")).toBe(90);
+    expect(len("2 hours and a half")).toBe(150);
+    expect(len("45 minutes")).toBe(45);
+    expect(len("1 hour 15")).toBe(75);
+    expect(len("tennis")).toBeUndefined();
+  });
+  test("a length with a time and a day", () =>
+    expect(p("tennis friday at 10 for 90 minutes")).toMatchObject({
+      intent: "book", slots: { amenity: "tennis", date: "2026-10-30", time: 600, minutes: 90 } }));
+  test("a length alone is a booking turn", () => expect(p("for 2 hours").intent).toBe("book"));
+  test("length doesn't read as a time or guests", () => {
+    expect(p("for 2 hours").slots.time).toBeUndefined();
+    expect(p("for 2 hours").slots.guests).toBeUndefined();
+    expect(p("2 hours at 3pm").slots).toMatchObject({ minutes: 120, time: 900 });
+  });
+  test("change the length", () => {
+    for (const t of ["change the length", "different length", "longer", "shorter", "can it be longer"])
+      expect(p(t), t).toMatchObject({ intent: "changeLength", changeTarget: "length" });
+    expect(p("actually 2 hours")).toMatchObject({ intent: "changeLength", slots: { minutes: 120 } });
+    expect(p("actually 2 hours").changeTarget).toBeUndefined();
+  });
+  test("go back from a full draft steps back from length", () =>
+    expect(parseMessage("go back", "2026-10-29", { guests: 1, amenity: "tennis", date: "2026-10-30", time: 600, minutes: 60 }).changeTarget).toBe("length"));
 });
 
 describe("interpret", () => {

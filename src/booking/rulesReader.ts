@@ -101,8 +101,11 @@ function readTimeOfDay(text: string): TimeOfDay | undefined {
 
 const clean = (s: string) => s.replace(/\s+/g, " ").trim();
 
+// Times are minutes since midnight. On the hour or half-hour is exact; other minutes snap down to the half-hour.
 function snap(hour: number, minutes: string | undefined, original: string): TimeRead {
-  return minutes && minutes !== "00" ? { time: hour, snappedFrom: clean(original) } : { time: hour };
+  const m = Number(minutes ?? 0);
+  if (m === 0 || m === 30) return { time: hour * 60 + m };
+  return { time: hour * 60 + (m > 30 ? 30 : 0), snappedFrom: clean(original) };
 }
 
 // A bare hour: 1–6 → PM, 7–11 → AM, 12 → noon.
@@ -114,7 +117,7 @@ function bareHour(h: number, minutes: string | undefined, original: string): Tim
 }
 
 function readTime(text: string): TimeRead {
-  if (/\bnoon\b/.test(text)) return { time: 12 };
+  if (/\bnoon\b/.test(text)) return { time: 720 };
 
   const meridiem = text.match(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/);
   if (meridiem) {
@@ -129,6 +132,22 @@ function readTime(text: string): TimeRead {
   const whole = text.match(/^(\d{1,2})(?::(\d{2}))?[\s.!]*$/);
   if (whole) return bareHour(Number(whole[1]), whole[2], `${whole[1]}${whole[2] ? `:${whole[2]}` : ""}`);
   return {};
+}
+
+// ---- length ----
+
+// "for 90 minutes", "2 hrs", "1.5 hours", "an hour and a half", "1 hour 15". Not validated here:
+// the chat says when a length isn't in 30-minute steps or is over the limit.
+function readLength(text: string): number | undefined {
+  if (/\bhalf an hour\b/.test(text)) return 30;
+  const andHalf = text.match(/\b(an|\d+) hours? and a half\b/);
+  if (andHalf) return (andHalf[1] === "an" ? 1 : Number(andHalf[1])) * 60 + 30;
+  // A bare number after the hours is minutes ("1 hour 15"), unless it's a time ("2 hours 3pm").
+  const hours = text.match(/\b(\d+(?:\.\d+)?)\s*(?:hours?|hrs?)\b(?:\s*(?:and\s+)?(\d{1,2})(?!\d|\s*(?:am|pm|:)))?/);
+  if (hours) return Math.round(Number(hours[1]) * 60) + Number(hours[2] ?? 0);
+  if (/\ban hour\b/.test(text)) return 60;
+  const minutes = text.match(/\b(\d+)\s*(?:minutes?|mins?)\b/);
+  return minutes ? Number(minutes[1]) : undefined;
 }
 
 // ---- guests ----
@@ -149,25 +168,30 @@ const FIND_RE = /\b(?:find|show|availability|open times)\b|\bwhen\b.*\bavailable
 const CHANGE_RE = /\b(?:different|another|change|instead|actually)\b/;
 const BOOK_RE = /\b(?:reserve|book)\b/;
 const OFF_TOPIC_RE = /\b(?:balance|arc|violation|pool key)\b/;
-const STEP_RE = /\b(?:change|different|another|back)\b.*\b(time|day|date|amenity)\b/;
+const STEP_RE = /\b(?:change|different|another|back)\b.*\b(time|day|date|amenity|length)\b/;
+const LENGTH_STEP_RE = /\b(?:longer|shorter)\b/;
 const GO_BACK_RE = /^go back[\s.!]*$/;
-const CHANGE_INTENT: Record<ChangeTarget, Intent> = { amenity: "changeAmenity", day: "changeDay", time: "changeTime" };
+const CHANGE_INTENT: Record<ChangeTarget, Intent> = {
+  amenity: "changeAmenity", day: "changeDay", time: "changeTime", length: "changeLength",
+};
 
-// The most recent step of the booking in progress: the last slot filled, in amenity → day → time order.
+// The most recent step of the booking in progress: the last slot filled, in amenity → day → time → length order.
 function lastStep(draft?: Draft): ChangeTarget {
+  if (draft?.minutes !== undefined && draft.time !== undefined && draft.date) return "length";
   if (draft?.time !== undefined && draft.date) return "time";
   if (draft?.date || draft?.range) return "day";
   return "amenity";
 }
 
-// "change the time", "different day", "back to amenity", bare "go back". A message that also
+// "change the time", "different day", "back to amenity", "longer", bare "go back". A message that also
 // gives a new value for that step ("change the day to friday") is a plain change instead.
 function readChangeTarget(text: string, slots: Slots, draft?: Draft): ChangeTarget | undefined {
   if (GO_BACK_RE.test(text)) return lastStep(draft);
+  if (LENGTH_STEP_RE.test(text) && slots.minutes === undefined) return "length";
   const m = text.match(STEP_RE);
   if (!m) return undefined;
   const target: ChangeTarget = m[1] === "date" ? "day" : (m[1] as ChangeTarget);
-  const given = target === "amenity" ? slots.amenity : target === "day" ? slots.date : slots.time;
+  const given = { amenity: slots.amenity, day: slots.date, time: slots.time, length: slots.minutes }[target];
   return given === undefined ? target : undefined;
 }
 
@@ -181,6 +205,7 @@ function readIntent(text: string, found: { slots: Slots; range?: DateRange; ambi
     if (slots.amenity) return "changeAmenity";
     if (slots.date) return "changeDay";
     if (slots.time !== undefined) return "changeTime";
+    if (slots.minutes !== undefined) return "changeLength";
   }
   if (Object.keys(slots).length > 0 || range || ambiguous || BOOK_RE.test(text)) return "book";
   if (OFF_TOPIC_RE.test(text)) return "offTopic";
@@ -197,11 +222,13 @@ export function parseMessage(input: string, today: ISODate, draft?: Draft): Inte
   const { time, snappedFrom } = readTime(text);
   const timeOfDay = dateTimeOfDay ?? readTimeOfDay(text);
   const guests = readGuests(text);
+  const minutes = readLength(text);
 
   const slots: Slots = {};
   if (amenity) slots.amenity = amenity;
   if (date) slots.date = date;
   if (time !== undefined) slots.time = time;
+  if (minutes !== undefined) slots.minutes = minutes;
   if (timeOfDay) slots.timeOfDay = timeOfDay;
   if (guests !== undefined) slots.guests = guests;
 
