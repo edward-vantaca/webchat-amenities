@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { COMMON_QUESTIONS, RESERVE_QUESTION, chatReducer, initChat } from "../chatReducer";
-import { addDays, formatDayLong, formatHour } from "../dates";
-import { hasOpenSlot, isFullyBookedByMock, openSlotsInRange, slotsFor } from "../availability";
+import { addDays, formatDayLong, formatLength, formatTime } from "../dates";
+import { hasOpenSlot, isFullyBookedByMock, lengthFits, lengthsFrom, openSlotsInRange, slotsFor } from "../availability";
 import { parseMessage } from "../rulesReader";
 import type { AmenityId, ChatEvent, ChatState, ISODate, Interpretation, Widget } from "../types";
 
@@ -24,8 +24,9 @@ const strip = (n = 14) => Array.from({ length: n }, (_, i) => addDays(TODAY, i))
 function openDay(amenity: AmenityId): ISODate {
   return strip().find((d) => hasOpenSlot(amenity, d, [], NOW))!;
 }
-function openHour(amenity: AmenityId, date: ISODate): number {
-  return slotsFor(amenity, date, [], NOW).find((s) => s.open)!.hour;
+// An open start where a 1-hour booking fits.
+function openTime(amenity: AmenityId, date: ISODate): number {
+  return slotsFor(amenity, date, [], NOW).find((s) => s.open && lengthFits(amenity, date, s.time, 60, []))!.time;
 }
 // A day that has both an open and a taken start, plus that taken hour.
 function dayWithTakenHour(amenity: AmenityId): { date: ISODate; hour: number } {
@@ -33,19 +34,20 @@ function dayWithTakenHour(amenity: AmenityId): { date: ISODate; hour: number } {
     const date = addDays(TODAY, i);
     const slots = slotsFor(amenity, date, [], NOW);
     const taken = slots.find((s) => !s.open);
-    if (taken && slots.some((s) => s.open)) return { date, hour: taken.hour };
+    if (taken && slots.some((s) => s.open)) return { date, hour: taken.time };
   }
   throw new Error("no day with a taken hour");
 }
 
 const OPEN_DAY = openDay("tennis");
-const OPEN_HOUR = openHour("tennis", OPEN_DAY);
+const OPEN_TIME = openTime("tennis", OPEN_DAY);
 
 function toSummary(): ChatState {
   let s = chatReducer(s0, { type: "commonQuestion", text: RESERVE_QUESTION });
   s = chatReducer(s, { type: "pickAmenity", amenity: "tennis", from: last(s).id });
   s = chatReducer(s, { type: "pickDate", date: OPEN_DAY, from: last(s).id });
-  return chatReducer(s, { type: "pickSlot", date: OPEN_DAY, time: OPEN_HOUR, from: activeId(s, "slots") });
+  s = chatReducer(s, { type: "pickSlot", date: OPEN_DAY, time: OPEN_TIME, from: activeId(s, "slots") });
+  return chatReducer(s, { type: "pickLength", minutes: 60, from: activeId(s, "lengths") });
 }
 
 function typed(s: ChatState, result: Interpretation): ChatState {
@@ -95,16 +97,26 @@ describe("tap path", () => {
     expect(last(s).widget).toEqual({ kind: "days", from: "2026-10-29", count: 14 });
     s = chatReducer(s, { type: "pickDate", date: OPEN_DAY, from: last(s).id });
     expect(s.messages.at(-3)).toMatchObject({ role: "user", text: formatDayLong(OPEN_DAY) });
-    expect(s.messages.at(-2)?.text).toBe(`Here are the open 1-hour slots for the Tennis Court on ${formatDayLong(OPEN_DAY)}:`);
+    expect(s.messages.at(-2)?.text).toBe(`Here are the open start times for the Tennis Court on ${formatDayLong(OPEN_DAY)}:`);
     const slotsMsg = s.messages.find((m) => m.active && m.widget?.kind === "slots")!;
     expect(slotsMsg.widget).toEqual({ kind: "slots", amenity: "tennis", date: OPEN_DAY });
-    s = chatReducer(s, { type: "pickSlot", date: OPEN_DAY, time: OPEN_HOUR, from: slotsMsg.id });
-    expect(s.messages.at(-2)).toMatchObject({ role: "user", text: formatHour(OPEN_HOUR) });
+    s = chatReducer(s, { type: "pickSlot", date: OPEN_DAY, time: OPEN_TIME, from: slotsMsg.id });
+    expect(s.messages.at(-3)).toMatchObject({ role: "user", text: formatTime(OPEN_TIME) });
+    expect(s.messages.at(-2)).toMatchObject({
+      text: "How long would you like the Tennis Court?",
+      widget: { kind: "lengths", amenity: "tennis", date: OPEN_DAY, time: OPEN_TIME },
+    });
+    expect(last(s).widget).toEqual({
+      kind: "chips",
+      chips: [{ label: "← Pick a different time", event: { type: "back", to: "time", from: 0 } }],
+    });
+    s = chatReducer(s, { type: "pickLength", minutes: 60, from: activeId(s, "lengths") });
+    expect(s.messages.at(-2)).toMatchObject({ role: "user", text: "1 hr" });
     expect(last(s).text).toBe("Here's your reservation. Does this look right?");
-    expect(last(s).widget).toMatchObject({ kind: "summary", amenity: "tennis", date: OPEN_DAY, time: OPEN_HOUR, guests: 1 });
+    expect(last(s).widget).toMatchObject({ kind: "summary", amenity: "tennis", date: OPEN_DAY, time: OPEN_TIME, minutes: 60, guests: 1 });
     s = chatReducer(s, { type: "confirm", from: last(s).id });
     expect(s.bookings).toHaveLength(1);
-    expect(s.bookings[0]).toMatchObject({ amenity: "tennis", date: OPEN_DAY, time: OPEN_HOUR, guests: 1 });
+    expect(s.bookings[0]).toMatchObject({ amenity: "tennis", date: OPEN_DAY, time: OPEN_TIME, minutes: 60, guests: 1 });
     expect(s.bookings[0].confirmation).toMatch(/^RS\d{5}$/);
     expect(s.draft).toEqual({ guests: 1 });
     const confirmMsg = s.messages.find((m) => m.widget?.kind === "confirmation")!;
@@ -194,12 +206,13 @@ describe("summary, change and back", () => {
     expect(s.bookings[0].guests).toBe(3);
   });
 
-  test("change shows three back chips", () => {
+  test("change shows the back chips, Different length first", () => {
     const s = chatReducer(toSummary(), { type: "change", from: last(toSummary()).id });
     expect(s.messages.at(-2)).toMatchObject({ role: "user", text: "Change" });
     expect(last(s).widget).toEqual({
       kind: "chips",
       chips: [
+        { label: "Different length", event: { type: "back", to: "length", from: 0 } },
         { label: "Different time", event: { type: "back", to: "time", from: 0 } },
         { label: "Different day", event: { type: "back", to: "day", from: 0 } },
         { label: "Different amenity", event: { type: "back", to: "amenity", from: 0 } },
@@ -220,7 +233,7 @@ describe("summary, change and back", () => {
 
     const toDay = chatReducer(s, { type: "back", to: "day", from: chipsId });
     expect(toDay.messages.find((m) => m.id > chipsId && m.role === "user")?.text).toBe("Different day");
-    expect(toDay.draft).toEqual({ amenity: "tennis", guests: 1 });
+    expect(toDay.draft).toEqual({ amenity: "tennis", minutes: 60, guests: 1 }); // the length is kept
     expect(last(toDay).widget).toEqual({ kind: "days", from: TODAY, count: 14 });
 
     // "← Pick a different day" from the slots chips echoes that label
@@ -233,15 +246,15 @@ describe("summary, change and back", () => {
     s = chatReducer(s, { type: "change", from: last(s).id });
     s = chatReducer(s, { type: "back", to: "amenity", from: last(s).id });
     expect(last(s).widget).toEqual({ kind: "amenities" });
-    expect(s.draft).toEqual({ date: OPEN_DAY, time: OPEN_HOUR, guests: 1 });
+    expect(s.draft).toEqual({ date: OPEN_DAY, time: OPEN_TIME, minutes: 60, guests: 1 });
     s = chatReducer(s, { type: "pickAmenity", amenity: "pickleball", from: last(s).id });
-    const pbOpen = slotsFor("pickleball", OPEN_DAY, [], NOW).find((x) => x.hour === OPEN_HOUR)?.open;
+    const pbOpen = slotsFor("pickleball", OPEN_DAY, [], NOW).find((x) => x.time === OPEN_TIME)?.open;
     if (!hasOpenSlot("pickleball", OPEN_DAY, [], NOW)) {
       expect(last(s).widget?.kind).toBe("days");
     } else if (pbOpen) {
-      expect(last(s).widget?.kind).toBe("summary");
+      expect(activeWidgets(s)[0].kind).toBe(lengthFits("pickleball", OPEN_DAY, OPEN_TIME, 60, []) ? "summary" : "lengths");
     } else {
-      expect(agentTexts(s).at(-1)).toContain(`${formatHour(OPEN_HOUR)} isn't available.`);
+      expect(agentTexts(s).at(-1)).toContain(`${formatTime(OPEN_TIME)} isn't available.`);
       expect(s.draft.time).toBeUndefined();
     }
   });
@@ -265,7 +278,7 @@ describe("summary, change and back", () => {
   test("own booking blocks the same slot afterwards", () => {
     let s = toSummary();
     s = chatReducer(s, { type: "confirm", from: last(s).id });
-    s = typed(s, { intent: "book", slots: { amenity: "tennis", date: OPEN_DAY, time: OPEN_HOUR } });
+    s = typed(s, { intent: "book", slots: { amenity: "tennis", date: OPEN_DAY, time: OPEN_TIME } });
     expect(agentTexts(s).at(-1)).toContain("isn't available");
   });
 });
@@ -305,9 +318,9 @@ describe("calendar", () => {
 describe("typed time is kept until it is used (R6)", () => {
   // A tennis hour together with a day it is open on and a day it is taken on (both days still bookable).
   function hourWithOpenAndTakenDay(): { hour: number; openOn: ISODate; takenOn: ISODate } {
-    for (const hour of [10, 11, 9, 14, 16, 18, 8, 12, 13, 15, 17, 19, 20, 7]) {
+    for (const hour of [10, 11, 9, 14, 16, 18, 8, 12, 13, 15, 17, 19, 20, 7].map((h) => h * 60)) {
       const days = strip().filter((d) => d !== TODAY && hasOpenSlot("tennis", d, [], NOW));
-      const at = (d: ISODate) => slotsFor("tennis", d, [], NOW).find((x) => x.hour === hour)!.open;
+      const at = (d: ISODate) => slotsFor("tennis", d, [], NOW).find((x) => x.time === hour)!.open;
       const openOn = days.find(at);
       const takenOn = days.find((d) => !at(d));
       if (openOn && takenOn) return { hour, openOn, takenOn };
@@ -316,19 +329,19 @@ describe("typed time is kept until it is used (R6)", () => {
   }
   const { hour, openOn, takenOn } = hourWithOpenAndTakenDay();
 
-  test("typed time then a tapped open day goes straight to the summary", () => {
+  test("typed time then a tapped open day goes straight to the length step", () => {
     let s = typed(s0, { intent: "book", slots: { amenity: "tennis", time: hour } });
     expect(last(s).widget?.kind).toBe("days");
     expect(s.draft.time).toBe(hour);
     s = chatReducer(s, { type: "pickDate", date: openOn, from: last(s).id });
-    expect(last(s).widget).toEqual({ kind: "summary", amenity: "tennis", date: openOn, time: hour, guests: 1 });
+    expect(activeWidgets(s)[0]).toEqual({ kind: "lengths", amenity: "tennis", date: openOn, time: hour });
   });
 
   test("typed time then a tapped day where it is taken says so and shows slots", () => {
     let s = typed(s0, { intent: "book", slots: { amenity: "tennis", time: hour } });
     s = chatReducer(s, { type: "pickDate", date: takenOn, from: last(s).id });
     expect(agentTexts(s).at(-1)).toBe(
-      `${formatHour(hour)} isn't available. Here are the open 1-hour slots for the Tennis Court on ${formatDayLong(takenOn)}:`,
+      `${formatTime(hour)} isn't available. Here are the open start times for the Tennis Court on ${formatDayLong(takenOn)}:`,
     );
     expect(activeWidgets(s).map((w) => w.kind)).toEqual(["slots", "chips"]);
     expect(s.draft.time).toBeUndefined();
@@ -354,7 +367,7 @@ describe("typed input", () => {
   test("typed everything jumps to summary", () => {
     let s = chatReducer(s0, { type: "userText", text: "x" });
     expect(s.pending).toBe(true);
-    s = chatReducer(s, { type: "interpreted", result: { intent: "book", slots: { amenity: "tennis", date: OPEN_DAY, time: OPEN_HOUR } }, turn: 1 });
+    s = chatReducer(s, { type: "interpreted", result: { intent: "book", slots: { amenity: "tennis", date: OPEN_DAY, time: OPEN_TIME, minutes: 60 } }, turn: 1 });
     expect(s.pending).toBe(false);
     expect(last(s).widget?.kind).toBe("summary");
   });
@@ -364,7 +377,7 @@ describe("typed input", () => {
     const s = typed(s0, { intent: "book", slots: { amenity: "tennis", date, time: hour } });
     expect(agentTexts(s).at(-1)).toContain("isn't available");
     expect(agentTexts(s).at(-1)).toBe(
-      `${formatHour(hour)} isn't available. Here are the open 1-hour slots for the Tennis Court on ${formatDayLong(date)}:`,
+      `${formatTime(hour)} isn't available. Here are the open start times for the Tennis Court on ${formatDayLong(date)}:`,
     );
     expect(activeWidgets(s).map((w) => w.kind)).toEqual(["slots", "chips"]);
     expect(s.draft.time).toBeUndefined();
@@ -393,11 +406,11 @@ describe("typed input", () => {
     expect(s.messages.at(-2)?.widget).toEqual({ kind: "slotList", amenity: "tennis", range: { from: "2026-11-02", to: "2026-11-08" } });
     expect(activeWidgets(s).map((w) => w.kind)).toEqual(["slotList", "chips"]); // finding 7: back chips
     expect(s.draft.find).toBeFalsy();
-    // tapping a tile in the list fills date + time, echoing the day too
-    const [{ date: day, hours: [hour] }] = openSlotsInRange("tennis", { from: "2026-11-02", to: "2026-11-08" }, [], NOW);
+    // tapping a tile in the list fills date + time, echoing the day too, then asks how long
+    const [{ date: day, times: [hour] }] = openSlotsInRange("tennis", { from: "2026-11-02", to: "2026-11-08" }, [], NOW);
     s = chatReducer(s, { type: "pickSlot", date: day, time: hour, from: activeId(s, "slotList") });
-    expect(s.messages.at(-2)).toMatchObject({ role: "user", text: `${formatDayLong(day)} at ${formatHour(hour)}` });
-    expect(last(s).widget).toMatchObject({ kind: "summary", date: day, time: hour });
+    expect(s.messages.at(-3)).toMatchObject({ role: "user", text: `${formatDayLong(day)} at ${formatTime(hour)}` });
+    expect(activeWidgets(s)[0]).toEqual({ kind: "lengths", amenity: "tennis", date: day, time: hour });
     expect(s.draft.range).toBeUndefined();
   });
 
@@ -431,22 +444,22 @@ describe("typed input", () => {
       const t = slotsFor("tennis", d, [], NOW);
       const p = slotsFor("pickleball", d, [], NOW);
       if (!p.some((x) => x.open)) continue;
-      const h = t.find((x) => x.open && !p.find((y) => y.hour === x.hour)!.open);
-      if (h) { found = { date: d, hour: h.hour }; break; }
+      const h = t.find((x) => x.open && lengthFits("tennis", d, x.time, 60, []) && !p.find((y) => y.time === x.time)!.open);
+      if (h) { found = { date: d, hour: h.time }; break; }
     }
     expect(found).toBeDefined();
     const { date, hour } = found!;
-    let s = typed(s0, { intent: "book", slots: { amenity: "tennis", date, time: hour } });
+    let s = typed(s0, { intent: "book", slots: { amenity: "tennis", date, time: hour, minutes: 60 } });
     expect(last(s).widget?.kind).toBe("summary");
     s = typed(s, { intent: "changeAmenity", slots: { amenity: "pickleball" } });
     expect(s.draft).toMatchObject({ amenity: "pickleball", date });
     expect(s.draft.time).toBeUndefined();
-    expect(agentTexts(s).at(-1)).toContain(`${formatHour(hour)} isn't available.`);
+    expect(agentTexts(s).at(-1)).toContain(`${formatTime(hour)} isn't available.`);
     expect(activeWidgets(s)[0]).toEqual({ kind: "slots", amenity: "pickleball", date });
   });
 
   test("change day clears the time", () => {
-    let s = typed(s0, { intent: "book", slots: { amenity: "tennis", date: OPEN_DAY, time: OPEN_HOUR } });
+    let s = typed(s0, { intent: "book", slots: { amenity: "tennis", date: OPEN_DAY, time: OPEN_TIME } });
     const other = strip().find((d) => d !== OPEN_DAY && hasOpenSlot("tennis", d, [], NOW))!;
     s = typed(s, { intent: "changeDay", slots: { date: other } });
     expect(s.draft).toMatchObject({ amenity: "tennis", date: other });
@@ -516,7 +529,7 @@ describe("typed input", () => {
   });
 
   test("snapped time is announced", () => {
-    const s = typed(s0, { intent: "book", slots: { amenity: "tennis", date: OPEN_DAY, time: 10 }, snappedFrom: "10:30" });
+    const s = typed(s0, { intent: "book", slots: { amenity: "tennis", date: OPEN_DAY, time: 600 }, snappedFrom: "10:15" });
     const text = agentTexts(s).at(-1)!;
     expect(text).toContain("The closest start is 10:00 AM");
     expect(text.startsWith("The closest start is 10:00 AM.")).toBe(true);
@@ -549,7 +562,7 @@ describe("typed input", () => {
   });
 
   test("typed guests are clamped", () => {
-    const s = typed(s0, { intent: "book", slots: { amenity: "tennis", date: OPEN_DAY, time: OPEN_HOUR, guests: 12 } });
+    const s = typed(s0, { intent: "book", slots: { amenity: "tennis", date: OPEN_DAY, time: OPEN_TIME, minutes: 60, guests: 12 } });
     expect(last(s).widget).toMatchObject({ kind: "summary", guests: 4 });
   });
 
@@ -563,5 +576,89 @@ describe("typed input", () => {
     expect(last(s).text).toBe("Something went wrong, please try again.");
     expect(last(s).widget).toEqual({ kind: "days", from: TODAY, count: 14 });
     expect(activeWidgets(s)).toHaveLength(1);
+  });
+});
+
+describe("length", () => {
+  const book = (slots: Interpretation["slots"]) => typed(s0, { intent: "book", slots: { amenity: "tennis", ...slots } });
+  // An open tennis start on OPEN_DAY-or-later where some length is cut off by a booking.
+  function cutStart(): { date: ISODate; time: number; cut: number } {
+    for (const date of strip(60).slice(1)) {
+      for (const sl of slotsFor("tennis", date, [], NOW)) {
+        const o = lengthsFrom("tennis", date, sl.time, []).find((x) => !x.ok && x.reason.kind === "booked");
+        if (sl.open && o) return { date, time: sl.time, cut: o.minutes };
+      }
+    }
+    throw new Error("no cut-off length");
+  }
+
+  test("typed time and length that fit skip the length step", () => {
+    const s = book({ date: OPEN_DAY, time: OPEN_TIME, minutes: 60 });
+    expect(last(s).widget).toMatchObject({ kind: "summary", time: OPEN_TIME, minutes: 60 });
+  });
+
+  test("a length that doesn't fit shows the tiles with a note", () => {
+    const { date, time, cut } = cutStart();
+    const s = book({ date, time, minutes: cut });
+    expect(agentTexts(s).at(-1)).toBe(
+      `${formatLength(cut)} doesn't fit at ${formatTime(time)}. How long would you like the Tennis Court?`,
+    );
+    expect(activeWidgets(s)[0]).toEqual({ kind: "lengths", amenity: "tennis", date, time });
+    expect(s.draft.minutes).toBeUndefined();
+  });
+
+  test("a length over the limit", () => {
+    const s = book({ date: OPEN_DAY, time: OPEN_TIME, minutes: 180 });
+    expect(agentTexts(s).at(-1)).toBe("The Tennis Court can be booked for up to 2 hrs. How long would you like the Tennis Court?");
+    expect(activeWidgets(s)[0].kind).toBe("lengths");
+  });
+
+  test("a length that isn't in half-hour steps", () => {
+    const s = book({ date: OPEN_DAY, time: OPEN_TIME, minutes: 45 });
+    expect(agentTexts(s).at(-1)).toBe("Bookings go in 30-minute steps. How long would you like the Tennis Court?");
+    expect(s.draft.minutes).toBeUndefined();
+  });
+
+  test("a length typed before a time is held", () => {
+    let s = book({ minutes: 60 });
+    expect(last(s).widget?.kind).toBe("days");
+    s = chatReducer(s, { type: "pickDate", date: OPEN_DAY, from: last(s).id });
+    s = chatReducer(s, { type: "pickSlot", date: OPEN_DAY, time: OPEN_TIME, from: activeId(s, "slots") });
+    expect(last(s).widget).toMatchObject({ kind: "summary", minutes: 60 });
+  });
+
+  test("Different length shows the tiles and keeps the time", () => {
+    let s = toSummary();
+    s = chatReducer(s, { type: "change", from: last(s).id });
+    s = chatReducer(s, { type: "back", to: "length", from: last(s).id });
+    expect(s.messages.find((m) => m.role === "user" && m.text === "Different length")).toBeTruthy();
+    expect(activeWidgets(s)[0]).toEqual({ kind: "lengths", amenity: "tennis", date: OPEN_DAY, time: OPEN_TIME });
+    expect(s.draft.time).toBe(OPEN_TIME);
+    expect(s.draft.minutes).toBeUndefined();
+  });
+
+  test("changing the time keeps the length and re-checks it", () => {
+    const { date, time, cut } = cutStart();
+    const fits = lengthsFrom("tennis", date, time, []).filter((o) => o.ok).at(-1)!.minutes;
+    // Book the cut-off length from some other start where it fits, then change the time to `time`.
+    const other = slotsFor("tennis", date, [], NOW).find((x) => x.open && lengthFits("tennis", date, x.time, cut, []));
+    let s = book({ date, time: other!.time, minutes: cut });
+    expect(last(s).widget?.kind).toBe("summary");
+    s = chatReducer(s, { type: "change", from: last(s).id });
+    s = chatReducer(s, { type: "back", to: "time", from: last(s).id });
+    expect(s.draft.minutes).toBe(cut);
+    const noFit = chatReducer(s, { type: "pickSlot", date, time, from: activeId(s, "slots") });
+    expect(agentTexts(noFit).at(-1)).toContain(`${formatLength(cut)} doesn't fit at ${formatTime(time)}.`);
+    expect(activeWidgets(noFit)[0].kind).toBe("lengths");
+    // a length that fits from `time` goes straight to the summary
+    const kept = { ...s, draft: { ...s.draft, minutes: fits } };
+    const fit = chatReducer(kept, { type: "pickSlot", date, time, from: activeId(kept, "slots") });
+    expect(last(fit).widget).toMatchObject({ kind: "summary", time, minutes: fits });
+  });
+
+  test("pickLength from an inactive widget is ignored", () => {
+    const s = toSummary();
+    const lengthsMsg = s.messages.find((m) => m.widget?.kind === "lengths")!;
+    expect(chatReducer(s, { type: "pickLength", minutes: 30, from: lengthsMsg.id })).toBe(s);
   });
 });

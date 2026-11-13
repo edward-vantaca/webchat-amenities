@@ -1,6 +1,6 @@
 import { getAmenity } from "./amenities";
-import { hasOpenSlot, openSlotsInRange, slotsFor } from "./availability";
-import { addDays, formatDayLong, formatHour, lastBookable, toISODate } from "./dates";
+import { LENGTH_STEP, hasOpenSlot, lengthFits, openSlotsInRange, slotsFor } from "./availability";
+import { addDays, formatDayLong, formatLength, formatLimit, formatTime, lastBookable, toISODate } from "./dates";
 import type {
   AmenityId, Booking, ChangeTarget, ChatEvent, ChatMessage, ChatState, Chip, DateRange, Draft, Interpretation, ISODate,
   Widget,
@@ -57,8 +57,10 @@ function clampGuests(guests: number, amenity?: AmenityId): number {
 }
 
 // What `back` (a chip, or a typed "change the time" / "go back") drops from the draft.
-// Every step back also clears a typed morning/afternoon/evening filter.
+// Every step back also clears a typed morning/afternoon/evening filter. A chosen length is kept
+// through time, day and amenity changes, and re-checked once there's a new start.
 function backDraft(draft: Draft, to: ChangeTarget): Draft {
+  if (to === "length") return without(draft, "minutes");
   if (to === "time") return without(draft, "time", "timeOfDay");
   if (to === "day") return without(draft, "date", "time", "range", "find", "timeOfDay");
   return without(draft, "amenity", "timeOfDay");
@@ -85,6 +87,19 @@ const backChips = (): NewMessage => ({
     ],
   },
 });
+
+const timeChips = (): NewMessage => ({
+  role: "agent",
+  widget: { kind: "chips", chips: [chip("← Pick a different time", { type: "back", to: "time", from: 0 })] },
+});
+
+// Why a kept length can't be booked from this start, or undefined when it can.
+function lengthProblem(a: ReturnType<typeof getAmenity>, date: ISODate, time: number, minutes: number, bookings: Booking[]) {
+  if (minutes < LENGTH_STEP || minutes % LENGTH_STEP !== 0) return "Bookings go in 30-minute steps.";
+  if (minutes > a.maxMinutes) return `The ${a.name} can be booked for up to ${formatLimit(a.maxMinutes).slice("Up to ".length)}.`;
+  if (!lengthFits(a.id, date, time, minutes, bookings)) return `${formatLength(minutes)} doesn't fit at ${formatTime(time)}.`;
+  return undefined;
+}
 
 function dayStrip(draft: Draft, todayISO: ISODate): Widget {
   if (draft.range) {
@@ -135,21 +150,30 @@ function prompt(state: ChatState, draft: Draft, opts: PromptOptions): { draft: D
   }
 
   const slots = slotsFor(a.id, draft.date, state.bookings, state.now);
-  const timeOpen = slots.some((s) => s.hour === draft.time && s.open);
+  const timeOpen = slots.some((s) => s.time === draft.time && s.open);
   if (!timeOpen) {
-    if (draft.time !== undefined) notes.push(`${formatHour(draft.time)} isn't available.`);
+    if (draft.time !== undefined) notes.push(`${formatTime(draft.time)} isn't available.`);
     const d = without(draft, "time");
     const { timeOfDay } = d;
     const filtered = timeOfDay && slotsFor(a.id, d.date!, state.bookings, state.now, timeOfDay).some((s) => s.open);
     const widget: Widget = filtered
       ? { kind: "slots", amenity: a.id, date: d.date!, timeOfDay }
       : { kind: "slots", amenity: a.id, date: d.date! };
-    const label = filtered ? `${timeOfDay} ${a.hours}-hour` : `${a.hours}-hour`;
-    return say(d, `Here are the open ${label} slots for the ${a.name} on ${formatDayLong(d.date!)}:`, widget, [backChips()]);
+    const label = filtered ? `${timeOfDay} start times` : "start times";
+    return say(d, `Here are the open ${label} for the ${a.name} on ${formatDayLong(d.date!)}:`, widget, [backChips()]);
+  }
+
+  const time = draft.time!;
+  const problem = draft.minutes === undefined ? undefined : lengthProblem(a, draft.date, time, draft.minutes, state.bookings);
+  if (draft.minutes === undefined || problem) {
+    if (problem) notes.push(problem);
+    return say(without(draft, "minutes"), `How long would you like the ${a.name}?`, {
+      kind: "lengths", amenity: a.id, date: draft.date, time,
+    }, [timeChips()]);
   }
 
   return say(draft, "Here's your reservation. Does this look right?", {
-    kind: "summary", amenity: a.id, date: draft.date, time: draft.time!, guests: clampGuests(draft.guests, a.id),
+    kind: "summary", amenity: a.id, date: draft.date, time, minutes: draft.minutes, guests: clampGuests(draft.guests, a.id),
   });
 }
 
@@ -180,8 +204,8 @@ export function confirmationNumber(nextId: number, date: ISODate, time: number):
 
 function confirm(state: ChatState, summary: ChatMessage, echo?: string): ChatState {
   if (summary.widget?.kind !== "summary") return state;
-  const { amenity, date, time, guests } = summary.widget;
-  const booking: Booking = { confirmation: confirmationNumber(state.nextId, date, time), amenity, date, time, guests };
+  const { amenity, date, time, minutes, guests } = summary.widget;
+  const booking: Booking = { confirmation: confirmationNumber(state.nextId, date, time), amenity, date, time, minutes, guests };
   const s = startTurn({ ...state, bookings: [...state.bookings, booking], draft: { guests: 1 } }, echo);
   return append(s, [
     { role: "agent", text: "You're all set!", widget: { kind: "confirmation", booking } },
@@ -243,6 +267,7 @@ function onInterpreted(state: ChatState, r: Interpretation): ChatState {
   if (s.amenity) d.amenity = s.amenity;
   if (s.date) d = { ...without(d, "range"), date: s.date };
   if (s.time !== undefined) d.time = s.time;
+  if (s.minutes !== undefined) d.minutes = s.minutes;
   if (s.timeOfDay) d.timeOfDay = s.timeOfDay;
   if (s.guests !== undefined) d.guests = s.guests;
   if (r.range) d = { ...without(d, "date"), range: r.range };
@@ -253,7 +278,7 @@ function onInterpreted(state: ChatState, r: Interpretation): ChatState {
   d.guests = clampGuests(d.guests, d.amenity);
 
   const notes: string[] = [];
-  if (r.snappedFrom && s.time !== undefined) notes.push(`The closest start is ${formatHour(s.time)}.`);
+  if (r.snappedFrom && s.time !== undefined) notes.push(`The closest start is ${formatTime(s.time)}.`);
   if (s.guests !== undefined && d.guests < s.guests) {
     notes.push(`The ${getAmenity(d.amenity!).name} allows up to ${d.guests} guests, so I've set it to ${d.guests}.`);
   }
@@ -279,6 +304,7 @@ const SOURCE_KINDS: Record<TapEvent["type"], Widget["kind"][]> = {
   openCalendar: ["days"],
   calendarMonth: ["calendar"],
   pickSlot: ["slots", "slotList"],
+  pickLength: ["lengths"],
   setGuests: ["summary"],
   confirm: ["summary"],
   change: ["summary"],
@@ -287,7 +313,7 @@ const SOURCE_KINDS: Record<TapEvent["type"], Widget["kind"][]> = {
   listReservations: ["chips"],
 };
 
-const BACK_LABELS = { time: "Different time", day: "Different day", amenity: "Different amenity" } as const;
+const BACK_LABELS = { length: "Different length", time: "Different time", day: "Different day", amenity: "Different amenity" } as const;
 
 function chipLabel(source: ChatMessage, matches: (e: ChatEvent) => boolean, fallback: string): string {
   const chips = source.widget?.kind === "chips" ? source.widget.chips : [];
@@ -319,9 +345,11 @@ function onTap(state: ChatState, event: TapEvent, source: ChatMessage): ChatStat
     }
     case "pickSlot": {
       const d = { ...without(draft, "range", "find"), date: event.date, time: event.time };
-      const echo = source.widget?.kind === "slotList" ? `${formatDayLong(event.date)} at ${formatHour(event.time)}` : formatHour(event.time);
+      const echo = source.widget?.kind === "slotList" ? `${formatDayLong(event.date)} at ${formatTime(event.time)}` : formatTime(event.time);
       return advance(startTurn(state, echo), d);
     }
+    case "pickLength":
+      return advance(startTurn(state, formatLength(event.minutes)), { ...draft, minutes: event.minutes });
     case "setGuests": {
       if (source.widget?.kind !== "summary") return state;
       const guests = clampGuests(event.guests, source.widget.amenity);
@@ -338,6 +366,7 @@ function onTap(state: ChatState, event: TapEvent, source: ChatMessage): ChatStat
         widget: {
           kind: "chips",
           chips: [
+            chip(BACK_LABELS.length, { type: "back", to: "length", from: 0 }),
             chip(BACK_LABELS.time, { type: "back", to: "time", from: 0 }),
             chip(BACK_LABELS.day, { type: "back", to: "day", from: 0 }),
             chip(BACK_LABELS.amenity, { type: "back", to: "amenity", from: 0 }),
