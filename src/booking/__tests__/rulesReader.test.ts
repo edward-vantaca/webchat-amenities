@@ -136,6 +136,22 @@ describe("booking length", () => {
     expect(p("actually 2 hours")).toMatchObject({ intent: "changeLength", slots: { minutes: 120 } });
     expect(p("actually 2 hours").changeTarget).toBeUndefined();
   });
+  test("a guest count, date or time after the length isn't read as minutes", () => {
+    expect(p("tennis tuesday at 10 for 2 hours 3 people").slots).toMatchObject({ minutes: 120, guests: 3, time: 600 });
+    expect(p("clubhouse for 6 hrs 40 guests").slots).toMatchObject({ minutes: 360, guests: 40 });
+    expect(p("1 hr 2 people").slots.minutes).toBe(60);
+    expect(p("2hrs 3 ppl").slots.minutes).toBe(120);
+    expect(p("for 1 hour 11/20").slots.minutes).toBe(60);
+    expect(p("2 hours 20th").slots.minutes).toBe(120);
+    expect(p("2 hours 10 a.m.").slots.minutes).toBe(120);
+    expect(p("1 hour 15").slots.minutes).toBe(75);
+    expect(p("1 hour 15 minutes").slots.minutes).toBe(75);
+  });
+  test("an hour and some minutes", () => {
+    expect(p("an hour and 30 minutes").slots.minutes).toBe(90);
+    expect(p("an hour 30").slots.minutes).toBe(90);
+    expect(p("1 hour and 30 minutes").slots.minutes).toBe(90);
+  });
   test("go back from a full draft steps back from length", () =>
     expect(parseMessage("go back", "2026-10-29", { guests: 1, amenity: "tennis", date: "2026-10-30", time: 600, minutes: 60 }).changeTarget).toBe("length"));
 });

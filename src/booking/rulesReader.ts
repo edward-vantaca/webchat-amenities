@@ -142,9 +142,12 @@ function readLength(text: string): number | undefined {
   if (/\bhalf an hour\b/.test(text)) return 30;
   const andHalf = text.match(/\b(an|\d+) hours? and a half\b/);
   if (andHalf) return (andHalf[1] === "an" ? 1 : Number(andHalf[1])) * 60 + 30;
-  // A bare number after the hours is minutes ("1 hour 15"), unless it's a time ("2 hours 3pm").
-  const hours = text.match(/\b(\d+(?:\.\d+)?)\s*(?:hours?|hrs?)\b(?:\s*(?:and\s+)?(\d{1,2})(?!\d|\s*(?:am|pm|:)))?/);
-  if (hours) return Math.round(Number(hours[1]) * 60) + Number(hours[2] ?? 0);
+  // A number after the hours is minutes only when it says so or ends the message ("1 hour 15"),
+  // so "2 hours 3 people", "1 hour 11/20" and "2 hours 10 a.m." keep their guests, date and time.
+  const hours = text.match(
+    /\b(\d+(?:\.\d+)?|an)\s*(?:hours?|hrs?)\b(?:\s*(?:and\s+)?(\d{1,2})(?=\s*(?:minutes?|mins?)\b|[\s.!?]*$))?/,
+  );
+  if (hours) return Math.round((hours[1] === "an" ? 1 : Number(hours[1])) * 60) + Number(hours[2] ?? 0);
   if (/\ban hour\b/.test(text)) return 60;
   const minutes = text.match(/\b(\d+)\s*(?:minutes?|mins?)\b/);
   return minutes ? Number(minutes[1]) : undefined;
