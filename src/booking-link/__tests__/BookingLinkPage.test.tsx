@@ -56,6 +56,28 @@ describe("BookingLinkPage", () => {
     expect(screen.queryByRole("button", { name: "‹ Back" })).not.toBeInTheDocument();
   });
 
+  test("has the mobile / desktop preview toggle", () => {
+    open();
+    expect(screen.getByRole("group", { name: "Preview size" })).toBeInTheDocument();
+  });
+
+  test("steps slide forward on a pick and back on Back, with no slide on first load", async () => {
+    const user = open("?amenity=tennis");
+    expect(screen.getByTestId("step")).not.toHaveClass("bl-step-forward", "bl-step-back");
+    await user.click(screen.getByRole("button", { name: formatDayLong(OPEN_DAY) }));
+    expect(screen.getByTestId("step")).toHaveClass("bl-step-forward");
+    await user.click(screen.getByRole("button", { name: "‹ Back" }));
+    expect(screen.getByTestId("step")).toHaveClass("bl-step-back");
+    await user.click(screen.getByRole("button", { name: "Pick another date" }));
+    expect(screen.getByTestId("step")).toHaveClass("bl-step-back"); // opening the calendar isn't a step change
+  });
+
+  test("the done screen slides in forward", async () => {
+    const user = open(REVIEW_LINK);
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+    expect(screen.getByTestId("step")).toHaveClass("bl-step-forward");
+  });
+
   test("deep link opens on review", () => {
     open(REVIEW_LINK);
     expect(heading("Review your reservation")).toBeInTheDocument();

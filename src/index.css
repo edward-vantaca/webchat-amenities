@@ -77,3 +77,41 @@ body,
 .booking-link .bl-widget {
   zoom: 1.15;
 }
+
+/* /booking-link: each step slides in from the side it came from. */
+@keyframes bl-in-forward {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes bl-in-back {
+  from {
+    opacity: 0;
+    transform: translateX(-24px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.bl-step-forward {
+  animation: bl-in-forward 240ms ease-out both;
+}
+
+.bl-step-back {
+  animation: bl-in-back 240ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bl-step-forward,
+  .bl-step-back {
+    animation: none;
+  }
+}

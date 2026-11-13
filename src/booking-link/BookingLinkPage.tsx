@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getAmenity } from "@/booking/amenities";
 import { confirmationNumber, initChat } from "@/booking/chatReducer";
 import { formatDayLong, toISODate } from "@/booking/dates";
@@ -10,6 +10,7 @@ import { DayStrip } from "@/chat/widgets/DayStrip";
 import { MonthCalendar } from "@/chat/widgets/MonthCalendar";
 import { SlotTiles } from "@/chat/widgets/SlotTiles";
 import { SummaryCard } from "@/chat/widgets/SummaryCard";
+import { DevicePreview } from "./DevicePreview";
 import { type DropNote, type LinkDraft, noteText, parseLink, stepBack, stepOf, toSearch } from "./link";
 
 // Placeholders until the magic link signs a real resident in.
@@ -96,6 +97,13 @@ export default function BookingLinkPage() {
     }
   }
 
+  // Slide forward on a pick and back on Back; nothing on first load. Only a change of screen
+  // (not opening the calendar, say) sets the direction, so the animation doesn't replay.
+  const order = done ? 5 : STEPS[step].n;
+  const slide = useRef<{ order: number; dir?: "forward" | "back" }>({ order });
+  if (slide.current.order !== order) slide.current = { order, dir: order > slide.current.order ? "forward" : "back" };
+  const dir = slide.current.dir;
+
   let body;
   if (done) {
     body = (
@@ -119,11 +127,6 @@ export default function BookingLinkPage() {
     const amenity = draft.amenity && getAmenity(draft.amenity);
     body = (
       <div className="flex flex-col gap-3">
-        <div className="flex gap-1" aria-hidden="true">
-          {[1, 2, 3, 4].map((i) => (
-            <i key={i} className={`h-1 flex-1 rounded-sm ${i <= n ? "bg-[#247ae4]" : "bg-[#e2e8f0]"}`} />
-          ))}
-        </div>
         {n > 1 && (
           <button type="button" onClick={() => go(stepBack(draft))}
             className="font-['DM_Sans:SemiBold',sans-serif] font-semibold self-start text-[14px] text-[#247ae4] cursor-pointer">
@@ -168,20 +171,36 @@ export default function BookingLinkPage() {
   }
 
   return (
-    <div className="booking-link min-h-full bg-white">
-      <div className="mx-auto flex min-h-full max-w-[480px] flex-col">
-        <header className="flex items-center gap-3 border-b border-[#eef0f4] px-4 py-3">
-          <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#f0f4fb] text-[#1D70DC]">
-            <AskHoaiIcon className="h-5 w-5" />
-          </div>
-          <div className="leading-tight">
-            <p className="font-['DM_Sans:SemiBold',sans-serif] font-semibold text-[16px] text-[#262630]">Reserve an amenity</p>
-            <p className="text-[13px] text-[#6b6b78]">{RESIDENT_LINE}</p>
-          </div>
-        </header>
-        <main className="flex-1 px-4 py-4">{body}</main>
-        <p className="pb-4 text-center text-[11px] text-[#b5b9c2]">Powered by HOAi</p>
+    <DevicePreview>
+      <div className="booking-link min-h-full bg-white">
+        <div className="mx-auto flex min-h-full max-w-[480px] flex-col">
+          <header className="flex items-center gap-3 border-b border-[#eef0f4] px-4 py-3">
+            <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#f0f4fb] text-[#1D70DC]">
+              <AskHoaiIcon className="h-5 w-5" />
+            </div>
+            <div className="leading-tight">
+              <p className="font-['DM_Sans:SemiBold',sans-serif] font-semibold text-[16px] text-[#262630]">Reserve an amenity</p>
+              <p className="text-[13px] text-[#6b6b78]">{RESIDENT_LINE}</p>
+            </div>
+          </header>
+          <main className="flex flex-1 flex-col gap-3 overflow-x-clip px-4 py-4">
+            {!done && (
+              <div className="flex gap-1" aria-hidden="true">
+                {[1, 2, 3, 4].map((i) => (
+                  <i
+                    key={i}
+                    className={`h-1 flex-1 rounded-sm transition-colors duration-300 ${i <= order ? "bg-[#247ae4]" : "bg-[#e2e8f0]"}`}
+                  />
+                ))}
+              </div>
+            )}
+            <div key={order} data-testid="step" className={dir ? `bl-step-${dir}` : undefined}>
+              {body}
+            </div>
+          </main>
+          <p className="pb-4 text-center text-[11px] text-[#b5b9c2]">Powered by HOAi</p>
+        </div>
       </div>
-    </div>
+    </DevicePreview>
   );
 }
