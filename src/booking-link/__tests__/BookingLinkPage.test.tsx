@@ -3,16 +3,19 @@ import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import BookingLinkPage from "../BookingLinkPage";
 import { AMENITIES } from "@/booking/amenities";
-import { isFullyBookedByMock, isMockTaken, startTimes } from "@/booking/availability";
-import { addDays, formatDayLong, formatHour } from "@/booking/dates";
+import { lengthFits, slotsFor } from "@/booking/availability";
+import { addDays, formatDayLong, formatRange, formatTime } from "@/booking/dates";
 
 const TODAY = "2026-11-12";
-// A tennis day inside the 14-day strip that the mock leaves bookable, and an open start on it.
-const openHourOn = (d: string) => startTimes("tennis").find((h) => !isMockTaken("tennis", d, h));
-const OPEN_DAY = Array.from({ length: 13 }, (_, i) => addDays(TODAY, i + 1))
-  .find((d) => !isFullyBookedByMock("tennis", d) && openHourOn(d) !== undefined)!;
-const OPEN_HOUR = openHourOn(OPEN_DAY)!;
-const REVIEW_LINK = `?token=t&amenity=tennis&date=${OPEN_DAY}&time=${OPEN_HOUR}`;
+// A tennis day inside the 14-day strip, and an open start on it (minutes since midnight) where 1 hr fits.
+const openTimeOn = (d: string) =>
+  slotsFor("tennis", d, [], new Date(2026, 10, 12, 9, 0)).find((s) => s.open && lengthFits("tennis", d, s.time, 60, []))?.time;
+const OPEN_DAY = Array.from({ length: 13 }, (_, i) => addDays(TODAY, i + 1)).find((d) => openTimeOn(d) !== undefined)!;
+const OPEN_TIME = openTimeOn(OPEN_DAY)!;
+const HHMM = `${String(Math.floor(OPEN_TIME / 60)).padStart(2, "0")}:${String(OPEN_TIME % 60).padStart(2, "0")}`;
+const LENGTH_LINK = `?token=t&amenity=tennis&date=${OPEN_DAY}&time=${HHMM}`;
+const REVIEW_LINK = `${LENGTH_LINK}&length=60`;
+const oneHour = () => screen.getByRole("button", { name: /^1 hr,/ });
 
 function open(search = "") {
   window.history.replaceState(null, "", "/booking-link" + search);
@@ -33,7 +36,7 @@ describe("BookingLinkPage", () => {
   test("opens on amenities with no params", () => {
     open();
     expect(heading("Choose an amenity")).toBeInTheDocument();
-    expect(screen.getByText("Step 1 of 4")).toBeInTheDocument();
+    expect(screen.getByText("Step 1 of 5")).toBeInTheDocument();
     for (const a of AMENITIES) expect(screen.getByRole("button", { name: new RegExp(a.name) })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "‹ Back" })).not.toBeInTheDocument();
     expect(screen.getByText("Maple Ridge HOA · Hi, Jordan")).toBeInTheDocument();
@@ -47,10 +50,16 @@ describe("BookingLinkPage", () => {
     expect(heading("Pick a time")).toBeInTheDocument();
     expect(screen.getByText("Tennis Court")).toBeInTheDocument();
     expect(screen.getByText(new RegExp(formatDayLong(OPEN_DAY)))).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: formatHour(OPEN_HOUR) }));
+    await user.click(screen.getByRole("button", { name: formatTime(OPEN_TIME) }));
+    expect(heading("How long?")).toBeInTheDocument();
+    expect(screen.getByText("Step 4 of 5")).toBeInTheDocument();
+    expect(screen.getByText(`${formatDayLong(OPEN_DAY)} · starts ${formatTime(OPEN_TIME)}`)).toBeInTheDocument();
+    await user.click(oneHour());
     expect(heading("Review your reservation")).toBeInTheDocument();
+    expect(screen.getByText("Length")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Confirm" }));
     expect(screen.getByText("✓ Reservation confirmed")).toBeInTheDocument();
+    expect(screen.getByText(new RegExp(formatRange(OPEN_TIME, 60)))).toBeInTheDocument();
     expect(screen.getByText(/Confirmation #RS\d{5}/)).toBeInTheDocument();
     expect(screen.getByText("You can close this page.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "‹ Back" })).not.toBeInTheDocument();
@@ -81,11 +90,30 @@ describe("BookingLinkPage", () => {
   test("deep link opens on review", () => {
     open(REVIEW_LINK);
     expect(heading("Review your reservation")).toBeInTheDocument();
-    expect(screen.getByText("Step 4 of 4")).toBeInTheDocument();
+    expect(screen.getByText("Step 5 of 5")).toBeInTheDocument();
+  });
+
+  test("the progress bar has five segments", () => {
+    open(REVIEW_LINK);
+    expect(document.querySelectorAll("main > div[aria-hidden] > i")).toHaveLength(5);
+  });
+
+  test("a link without length opens on How long?", () => {
+    open(LENGTH_LINK);
+    expect(heading("How long?")).toBeInTheDocument();
+    expect(window.location.search).toBe(LENGTH_LINK);
+  });
+
+  test("a length the page can't use says so on How long?", () => {
+    open(`${LENGTH_LINK}&length=45`);
+    expect(heading("How long?")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("That length isn't available. Pick how long.");
   });
 
   test("back works from a step the link filled in", async () => {
     const user = open(REVIEW_LINK);
+    await user.click(screen.getByRole("button", { name: "‹ Back" }));
+    expect(heading("How long?")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "‹ Back" }));
     expect(heading("Pick a time")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "‹ Back" }));
@@ -94,10 +122,11 @@ describe("BookingLinkPage", () => {
     expect(heading("Choose an amenity")).toBeInTheDocument();
   });
 
-  test("summary Change goes to times", async () => {
+  test("summary Change goes to How long?", async () => {
     const user = open(REVIEW_LINK);
     await user.click(screen.getByRole("button", { name: "Change" }));
-    expect(heading("Pick a time")).toBeInTheDocument();
+    expect(heading("How long?")).toBeInTheDocument();
+    expect(window.location.search).toBe(LENGTH_LINK);
   });
 
   test("drop note shows then clears on the next tap", async () => {
@@ -122,7 +151,7 @@ describe("BookingLinkPage", () => {
     expect(heading("Choose an amenity")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /Tennis Court/ }));
     await user.click(screen.getByRole("button", { name: formatDayLong(OPEN_DAY) }));
-    expect(screen.getByRole("button", { name: formatHour(OPEN_HOUR) })).toBeDisabled();
+    expect(screen.getByRole("button", { name: formatTime(OPEN_TIME) })).toBeDisabled();
   });
 });
 
@@ -152,16 +181,25 @@ describe("BookingLinkPage address bar", () => {
     expect(await screen.findByRole("heading", { name: "Choose an amenity" })).toBeInTheDocument();
   });
 
+  test("phone back from review lands on How long?", async () => {
+    const user = open(LENGTH_LINK);
+    await user.click(oneHour());
+    expect(heading("Review your reservation")).toBeInTheDocument();
+    back();
+    expect(await screen.findByRole("heading", { name: "How long?" })).toBeInTheDocument();
+  });
+
   test("back after confirm lands on times with the booked slot taken", async () => {
     const user = open("?token=t&amenity=tennis");
     await user.click(screen.getByRole("button", { name: formatDayLong(OPEN_DAY) }));
-    await user.click(screen.getByRole("button", { name: formatHour(OPEN_HOUR) }));
+    await user.click(screen.getByRole("button", { name: formatTime(OPEN_TIME) }));
+    await user.click(oneHour());
     await user.click(screen.getByRole("button", { name: "Confirm" }));
     expect(window.location.search).toBe("?token=t");
     back();
     expect(await screen.findByRole("heading", { name: "Pick a time" })).toBeInTheDocument();
     expect(window.location.search).toBe(`?token=t&amenity=tennis&date=${OPEN_DAY}`);
-    expect(screen.getByRole("button", { name: formatHour(OPEN_HOUR) })).toBeDisabled();
+    expect(screen.getByRole("button", { name: formatTime(OPEN_TIME) })).toBeDisabled();
   });
 
   test("token kept through taps, confirm and book something else", async () => {
@@ -171,13 +209,16 @@ describe("BookingLinkPage address bar", () => {
     seen.push(window.location.search);
     await user.click(screen.getByRole("button", { name: formatDayLong(OPEN_DAY) }));
     seen.push(window.location.search);
-    await user.click(screen.getByRole("button", { name: formatHour(OPEN_HOUR) }));
+    await user.click(screen.getByRole("button", { name: formatTime(OPEN_TIME) }));
+    seen.push(window.location.search);
+    await user.click(oneHour());
     seen.push(window.location.search);
     await user.click(screen.getByRole("button", { name: "Confirm" }));
     seen.push(window.location.search);
     await user.click(screen.getByRole("button", { name: "Book something else" }));
     seen.push(window.location.search);
     for (const s of seen) expect(s.startsWith("?token=t")).toBe(true);
-    expect(seen[2]).toBe(`?token=t&amenity=tennis&date=${OPEN_DAY}&time=${OPEN_HOUR}`);
+    expect(seen[2]).toBe(LENGTH_LINK);
+    expect(seen[3]).toBe(REVIEW_LINK);
   });
 });

@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { getAmenity } from "@/booking/amenities";
 import { confirmationNumber, initChat } from "@/booking/chatReducer";
-import { formatDayLong, toISODate } from "@/booking/dates";
+import { formatDayLong, formatLimit, formatTime, toISODate } from "@/booking/dates";
 import type { Booking, ChatEvent, ChatState, ISODate } from "@/booking/types";
 import { AskHoaiIcon } from "@/chat/AskHoaiPanel";
 import { AmenityGrid } from "@/chat/widgets/AmenityGrid";
 import { ConfirmationCard } from "@/chat/widgets/ConfirmationCard";
 import { DayStrip } from "@/chat/widgets/DayStrip";
+import { LengthTiles } from "@/chat/widgets/LengthTiles";
 import { MonthCalendar } from "@/chat/widgets/MonthCalendar";
 import { SlotTiles } from "@/chat/widgets/SlotTiles";
 import { SummaryCard } from "@/chat/widgets/SummaryCard";
@@ -20,8 +21,10 @@ const STEPS = {
   amenity: { n: 1, title: "Choose an amenity" },
   date: { n: 2, title: "Pick a date" },
   time: { n: 3, title: "Pick a time" },
-  review: { n: 4, title: "Review your reservation" },
+  length: { n: 4, title: "How long?" },
+  review: { n: 5, title: "Review your reservation" },
 } as const;
+const STEP_COUNT = 5;
 
 type PageState = {
   token?: string;
@@ -43,14 +46,17 @@ export default function BookingLinkPage() {
   const url = (d: LinkDraft) => PATH + toSearch(state.token, d);
 
   // The address bar always holds exactly what's chosen so far, so dropped link values leave it on load.
-  // Phone back re-reads an earlier entry with the same rules as an incoming link.
+  // Phone back re-reads an earlier entry with the same rules as an incoming link, and drops what no
+  // longer holds (say, a time the resident has since booked) from the address bar the same way.
+  const latest = useRef(state);
+  latest.current = state;
   useEffect(() => {
     window.history.replaceState(null, "", url(draft));
-    const onPop = () =>
-      setState((s) => {
-        const { draft, note } = parseLink(window.location.search, s.bookings, new Date());
-        return { ...s, draft, note, done: undefined, calendarMonth: undefined };
-      });
+    const onPop = () => {
+      const { draft, note } = parseLink(window.location.search, latest.current.bookings, new Date());
+      window.history.replaceState(null, "", PATH + toSearch(latest.current.token, draft));
+      setState((s) => ({ ...s, draft, note, done: undefined, calendarMonth: undefined }));
+    };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
     // Runs once, on mount.
@@ -63,12 +69,13 @@ export default function BookingLinkPage() {
   }
 
   function confirm() {
-    if (!draft.amenity || !draft.date || draft.time === undefined) return;
+    if (!draft.amenity || !draft.date || draft.time === undefined || draft.minutes === undefined) return;
     const booking: Booking = {
       confirmation: confirmationNumber(bookings.length + 1, draft.date, draft.time),
       amenity: draft.amenity,
       date: draft.date,
       time: draft.time,
+      minutes: draft.minutes,
       guests: 1,
     };
     // Replace, so phone back can't return to a review of a slot that's now taken.
@@ -90,6 +97,8 @@ export default function BookingLinkPage() {
         return setState((s) => ({ ...s, note: undefined, calendarMonth: e.month }));
       case "pickSlot":
         return go({ amenity: draft.amenity, date: draft.date, time: e.time });
+      case "pickLength":
+        return go({ ...draft, minutes: e.minutes });
       case "change":
         return go(stepBack(draft));
       case "confirm":
@@ -99,7 +108,7 @@ export default function BookingLinkPage() {
 
   // Slide forward on a pick and back on Back; nothing on first load. Only a change of screen
   // (not opening the calendar, say) sets the direction, so the animation doesn't replay.
-  const order = done ? 5 : STEPS[step].n;
+  const order = done ? STEP_COUNT + 1 : STEPS[step].n;
   const slide = useRef<{ order: number; dir?: "forward" | "back" }>({ order });
   if (slide.current.order !== order) slide.current = { order, dir: order > slide.current.order ? "forward" : "back" };
   const dir = slide.current.dir;
@@ -134,19 +143,22 @@ export default function BookingLinkPage() {
           </button>
         )}
         <div>
-          <p className="text-[12px] uppercase tracking-wide text-[#8a8a96]">Step {n} of 4</p>
+          <p className="text-[12px] uppercase tracking-wide text-[#8a8a96]">Step {n} of {STEP_COUNT}</p>
           <h1 className="font-['DM_Sans:SemiBold',sans-serif] font-semibold text-[22px] text-[#262630]">{title}</h1>
         </div>
         {state.note && (
           <p role="status" className="rounded-lg bg-[#fff7e6] px-3 py-2 text-[14px] text-[#7a5200]">{noteText(state.note)}</p>
         )}
-        {amenity && (step === "date" || step === "time") && (
+        {amenity && (step === "date" || step === "time" || step === "length") && (
           <div className="flex items-center gap-3 rounded-[10px] border border-[#cfe0f5] bg-[#f5f9ff] p-2 text-[14px] text-[#262630]">
             <img src={amenity.image} alt="" className="h-10 w-14 rounded-md object-cover" />
             <div>
               <p className="font-['DM_Sans:SemiBold',sans-serif] font-semibold">{amenity.name}</p>
               {step === "time" && draft.date && (
-                <p className="text-[#6b6b78]">{formatDayLong(draft.date)} · {amenity.hours} hr</p>
+                <p className="text-[#6b6b78]">{formatDayLong(draft.date)} · {formatLimit(amenity.maxMinutes).toLowerCase()}</p>
+              )}
+              {step === "length" && draft.date && draft.time !== undefined && (
+                <p className="text-[#6b6b78]">{formatDayLong(draft.date)} · starts {formatTime(draft.time)}</p>
               )}
             </div>
           </div>
@@ -162,8 +174,11 @@ export default function BookingLinkPage() {
           {step === "time" && draft.amenity && draft.date && (
             <SlotTiles amenity={draft.amenity} date={draft.date} state={widgetState} dispatch={onWidget} />
           )}
-          {step === "review" && draft.amenity && draft.date && draft.time !== undefined && (
-            <SummaryCard amenity={draft.amenity} date={draft.date} time={draft.time} dispatch={onWidget} />
+          {step === "length" && draft.amenity && draft.date && draft.time !== undefined && (
+            <LengthTiles amenity={draft.amenity} date={draft.date} time={draft.time} state={widgetState} dispatch={onWidget} />
+          )}
+          {step === "review" && draft.amenity && draft.date && draft.time !== undefined && draft.minutes !== undefined && (
+            <SummaryCard amenity={draft.amenity} date={draft.date} time={draft.time} minutes={draft.minutes} dispatch={onWidget} />
           )}
         </div>
       </div>
@@ -186,7 +201,7 @@ export default function BookingLinkPage() {
           <main className="flex flex-1 flex-col gap-3 overflow-x-clip px-4 py-4">
             {!done && (
               <div className="flex gap-1" aria-hidden="true">
-                {[1, 2, 3, 4].map((i) => (
+                {Array.from({ length: STEP_COUNT }, (_, i) => i + 1).map((i) => (
                   <i
                     key={i}
                     className={`h-1 flex-1 rounded-sm transition-colors duration-300 ${i <= order ? "bg-[#247ae4]" : "bg-[#e2e8f0]"}`}
