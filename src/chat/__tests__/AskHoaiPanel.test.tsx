@@ -3,19 +3,18 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import AskHoaiPanel from "../AskHoaiPanel";
 import { interpret } from "@/booking/interpret";
-import { isFullyBookedByMock, isMockTaken, startTimes } from "@/booking/availability";
-import { addDays, formatHour } from "@/booking/dates";
+import { slotsFor } from "@/booking/availability";
+import { addDays, formatTime } from "@/booking/dates";
 
 vi.mock("@/booking/interpret", async () => {
   const actual = await vi.importActual<typeof import("@/booking/interpret")>("@/booking/interpret");
   return { ...actual, interpret: vi.fn(actual.interpret) };
 });
 
-// A November day that the mock leaves bookable: not fully booked, with an untaken start.
-const openHourOn = (d: string) => startTimes("tennis").find((h) => !isMockTaken("tennis", d, h));
-const OPEN_DAY = Array.from({ length: 20 }, (_, i) => addDays("2026-11-03", i))
-  .find((d) => !isFullyBookedByMock("tennis", d) && openHourOn(d) !== undefined)!;
-const OPEN_HOUR = openHourOn(OPEN_DAY)!;
+// A November day that the mock leaves bookable, and an open start on it (minutes since midnight).
+const openTimeOn = (d: string) => slotsFor("tennis", d, [], new Date(2026, 9, 29, 9, 0)).find((s) => s.open)?.time;
+const OPEN_DAY = Array.from({ length: 20 }, (_, i) => addDays("2026-11-03", i)).find((d) => openTimeOn(d) !== undefined)!;
+const OPEN_TIME = openTimeOn(OPEN_DAY)!;
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -38,14 +37,17 @@ describe("AskHoaiPanel conversation", () => {
     expect(screen.queryByText(/Welcome back/)).not.toBeInTheDocument();
   });
 
-  test("typing a full request reaches the summary", async () => {
+  test("typing a day and time asks how long, then a length tile reaches the summary", async () => {
     const user = userEvent.setup();
     render(<AskHoaiPanel typingDelay={() => 0} />);
     await user.type(
       screen.getByRole("textbox"),
-      `tennis on nov ${Number(OPEN_DAY.slice(8))} at ${formatHour(OPEN_HOUR)}{Enter}`,
+      `tennis on nov ${Number(OPEN_DAY.slice(8))} at ${formatTime(OPEN_TIME)}{Enter}`,
     );
+    expect(await screen.findByText(/How long would you like the Tennis Court\?/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^30 min,/ }));
     expect(await screen.findByRole("button", { name: "Confirm" })).toBeInTheDocument();
+    expect(screen.getByText("Length")).toBeInTheDocument();
   });
 
   test("Enter while an IME is composing does not send", async () => {
