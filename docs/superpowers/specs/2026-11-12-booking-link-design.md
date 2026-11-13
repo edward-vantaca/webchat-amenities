@@ -92,6 +92,7 @@ When a value is dropped, the step it falls back to shows one line explaining why
 - unknown amenity: "We couldn't find that amenity. Pick one below."
 - bad date: "That date isn't available. Pick another day."
 - bad time: "<time> is taken that day. Pick another time." (or "isn't available" when it's past or not a start hour)
+- unreadable time (e.g. `10am`, `25`): "That time isn't available. Pick another time." (added after the final review)
 
 The note goes away after the resident's next tap.
 

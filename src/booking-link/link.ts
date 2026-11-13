@@ -8,6 +8,7 @@ export type LinkDraft = { amenity?: AmenityId; date?: ISODate; time?: number };
 export type DropNote =
   | { reason: "amenity" }
   | { reason: "date" }
+  | { reason: "timeInvalid" } // a time the page can't read as an hour, e.g. "10am" or "25"
   | { reason: "timeTaken"; time: number }
   | { reason: "timeUnavailable"; time: number };
 export type ParsedLink = { token?: string; draft: LinkDraft; note?: DropNote };
@@ -37,8 +38,9 @@ export function parseLink(search: string, bookings: Booking[], now: Date): Parse
   }
 
   const rawTime = q.get("time") ?? "";
-  if (!/^\d{1,2}$/.test(rawTime)) return out({ amenity, date });
+  if (!rawTime) return out({ amenity, date });
   const time = Number(rawTime);
+  if (!/^\d{1,2}$/.test(rawTime) || time > 23) return out({ amenity, date }, { reason: "timeInvalid" });
   const slot = slotsFor(amenity, date, bookings, now).find((s) => s.hour === time);
   if (!slot) return out({ amenity, date }, { reason: "timeUnavailable", time });
   if (!slot.open) return out({ amenity, date }, { reason: "timeTaken", time });
@@ -74,6 +76,8 @@ export function noteText(note: DropNote): string {
       return "We couldn't find that amenity. Pick one below.";
     case "date":
       return "That date isn't available. Pick another day.";
+    case "timeInvalid":
+      return "That time isn't available. Pick another time.";
     case "timeTaken":
       return `${formatHour(note.time)} is taken that day. Pick another time.`;
     case "timeUnavailable":

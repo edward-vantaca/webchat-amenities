@@ -102,11 +102,19 @@ describe("parseLink", () => {
     for (const d of ["2026-02-30", "11/14"]) {
       expect(parse(`?amenity=tennis&date=${d}`).note).toEqual({ reason: "date" });
     }
-    for (const t of ["10am", "10.5", ""]) {
-      expect(parse(`?amenity=tennis&date=${OPEN_DAY}&time=${t}`)).toEqual({ draft: { amenity: "tennis", date: OPEN_DAY } });
-    }
+    expect(parse(`?amenity=tennis&date=${OPEN_DAY}&time=`)).toEqual({ draft: { amenity: "tennis", date: OPEN_DAY } });
     expect(parse("?amenity=Tennis").draft).toEqual({ amenity: "tennis" });
   });
+});
+
+test("an unreadable or out-of-range time gets a note", () => {
+  for (const t of ["10am", "10.5", "24", "25"]) {
+    expect(parse(`?amenity=tennis&date=${OPEN_DAY}&time=${t}`)).toEqual({
+      draft: { amenity: "tennis", date: OPEN_DAY },
+      note: { reason: "timeInvalid" },
+    });
+  }
+  expect(noteText({ reason: "timeInvalid" })).toBe("That time isn't available. Pick another time.");
 });
 
 describe("toSearch", () => {
