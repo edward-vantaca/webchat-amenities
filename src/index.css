@@ -68,3 +68,12 @@ body,
     animation: none;
   }
 }
+
+/* /booking-link: the chat's widgets, sized up for thumbs. */
+.booking-link button {
+  min-height: 44px;
+}
+
+.booking-link .bl-widget {
+  zoom: 1.15;
+}

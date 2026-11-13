@@ -173,7 +173,7 @@ function reshow(state: ChatState, text: string): ChatState {
 
 // ---- confirmation and reservations ----
 
-function confirmationNumber(nextId: number, date: ISODate, time: number): string {
+export function confirmationNumber(nextId: number, date: ISODate, time: number): string {
   const seed = Number(date.replace(/-/g, "")) + nextId * 7919 + time * 31;
   return `RS${10000 + (seed % 90000)}`;
 }
