@@ -47,15 +47,30 @@ export function formatDayShort(s: ISODate): { weekday: string; day: string; mont
   return { weekday: WEEKDAYS[d.getDay()].slice(0, 3), day: String(d.getDate()), month: MONTHS[d.getMonth()] };
 }
 
-const meridiem = (h: number) => (h % 24 >= 12 ? "PM" : "AM");
-const clock = (h: number) => `${h % 12 === 0 ? 12 : h % 12}:00`;
+// Times are minutes since midnight.
+const meridiem = (m: number) => (Math.floor(m / 60) % 24 >= 12 ? "PM" : "AM");
 
-export function formatHour(h: number): string {
-  return `${clock(h)} ${meridiem(h)}`;
+export function formatClock(m: number): string {
+  const h = Math.floor(m / 60) % 12;
+  return `${h === 0 ? 12 : h}:${pad(m % 60)}`;
 }
 
-export function formatRange(h: number, hours: number): string {
-  const end = h + hours;
-  if (meridiem(h) === meridiem(end)) return `${clock(h)} – ${clock(end)} ${meridiem(end)}`;
-  return `${formatHour(h)} – ${formatHour(end)}`;
+export function formatTime(m: number): string {
+  return `${formatClock(m)} ${meridiem(m)}`;
+}
+
+export function formatRange(start: number, minutes: number): string {
+  const end = start + minutes;
+  if (meridiem(start) === meridiem(end)) return `${formatClock(start)} – ${formatClock(end)} ${meridiem(end)}`;
+  return `${formatTime(start)} – ${formatTime(end)}`;
+}
+
+export function formatLength(minutes: number): string {
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}${minutes % 60 === 30 ? "½" : ""} hr`;
+}
+
+export function formatLimit(minutes: number): string {
+  return `Up to ${formatLength(minutes).replace(" hr", " hrs")}`;
 }
