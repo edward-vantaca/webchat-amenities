@@ -5,7 +5,7 @@ import type { Booking } from "../../booking/types";
 export function bookingLine(b: Booking): string {
   const a = getAmenity(b.amenity);
   const d = formatDayShort(b.date);
-  return `${a.name} · ${d.weekday}, ${d.month} ${d.day} · ${formatRange(b.time, a.hours)} · ${b.guests} ${b.guests === 1 ? "guest" : "guests"}`;
+  return `${a.name} · ${d.weekday}, ${d.month} ${d.day} · ${formatRange(b.time, b.minutes)} · ${b.guests} ${b.guests === 1 ? "guest" : "guests"}`;
 }
 
 export function ConfirmationCard({ booking }: { booking: Booking }) {

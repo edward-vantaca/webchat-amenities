@@ -4,8 +4,8 @@ import userEvent from "@testing-library/user-event";
 import { WidgetView } from "../widgets/WidgetView";
 import { chatReducer, initChat } from "../../booking/chatReducer";
 import { AMENITIES } from "../../booking/amenities";
-import { addDays, formatDayLong } from "../../booking/dates";
-import { hasOpenSlot, isFullyBookedByMock, slotsFor } from "../../booking/availability";
+import { addDays, formatClock, formatDayLong, formatLength, formatRange, formatTime } from "../../booking/dates";
+import { hasOpenSlot, isFullyBookedByMock, lengthsFrom, slotsFor } from "../../booking/availability";
 import type { AmenityId, Booking, ChatMessage, ChatState, Widget } from "../../booking/types";
 
 const NOW = new Date(2026, 9, 29, 9, 0);
@@ -24,7 +24,7 @@ function setup(widget: Widget, state: ChatState = base, active = true) {
   return { dispatch, user: userEvent.setup(), ...utils };
 }
 
-const booking: Booking = { confirmation: "RS12345", amenity: "tennis", date: "2026-10-31", time: 10, guests: 2 };
+const booking: Booking = { confirmation: "RS12345", amenity: "tennis", date: "2026-10-31", time: 600, minutes: 90, guests: 2 };
 
 describe("widgets", () => {
   test("amenity grid dispatches pickAmenity with message id", async () => {
@@ -34,10 +34,10 @@ describe("widgets", () => {
     expect(dispatch).toHaveBeenCalledWith({ type: "pickAmenity", amenity: "tennis", from: 7 });
   });
 
-  test("amenity tiles read booking length · up to N guests", () => {
+  test("amenity tiles read the limit · up to N guests", () => {
     setup({ kind: "amenities" });
-    expect(screen.getByRole("button", { name: /Tennis Court/ })).toHaveTextContent("1 hr · up to 4 guests");
-    expect(screen.getByRole("button", { name: /Main Clubhouse/ })).toHaveTextContent("4 hr · up to 60 guests");
+    expect(screen.getByRole("button", { name: /Tennis Court/ })).toHaveTextContent("Up to 2 hrs · up to 4 guests");
+    expect(screen.getByRole("button", { name: /Main Clubhouse/ })).toHaveTextContent("Up to 6 hrs · up to 60 guests");
   });
 
   test("inactive widget is aria-disabled and faded", () => {
@@ -84,10 +84,38 @@ describe("widgets", () => {
     const taken = slots.find((s) => !s.open)!;
     const open = slots.find((s) => s.open)!;
     const { dispatch, user } = setup({ kind: "slots", amenity: "tennis", date }, withAmenity("tennis"));
-    const label = (h: number) => `${h % 12 === 0 ? 12 : h % 12}:00 ${h >= 12 ? "PM" : "AM"}`;
-    expect(screen.getByRole("button", { name: label(taken.hour) })).toBeDisabled();
-    await user.click(screen.getByRole("button", { name: label(open.hour) }));
-    expect(dispatch).toHaveBeenCalledWith({ type: "pickSlot", date, time: open.hour, from: 7 });
+    expect(screen.getByRole("button", { name: formatTime(taken.time) })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: formatTime(open.time) }));
+    expect(dispatch).toHaveBeenCalledWith({ type: "pickSlot", date, time: open.time, from: 7 });
+  });
+
+  test("slot tiles show half-hour starts", () => {
+    const date = addDays(TODAY, 1);
+    setup({ kind: "slots", amenity: "tennis", date }, withAmenity("tennis"));
+    expect(screen.getByRole("button", { name: "10:30 AM" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "8:30 PM" })).toBeInTheDocument();
+  });
+
+  test("length tiles list each length with its range, and disable cut-off ones with the reason", async () => {
+    let found: { date: string; time: number } | undefined;
+    for (let i = 1; i < 60 && !found; i++) {
+      const d = addDays(TODAY, i);
+      const t = slotsFor("tennis", d, [], NOW).find(
+        (x) => x.open && lengthsFrom("tennis", d, x.time, []).some((o) => !o.ok && o.reason.kind === "booked"),
+      );
+      if (t) found = { date: d, time: t.time };
+    }
+    const { date, time } = found!;
+    const options = lengthsFrom("tennis", date, time, []);
+    const cut = options.find((o) => !o.ok)!;
+    const { dispatch, user } = setup({ kind: "lengths", amenity: "tennis", date, time }, withAmenity("tennis"));
+    expect(screen.getAllByRole("button")).toHaveLength(4); // 30 min … 2 hr, nothing over the limit
+    expect(screen.getByRole("button", { name: `30 min, ${formatRange(time, 30)}` })).toBeEnabled();
+    if (!cut.ok && cut.reason.kind === "booked") {
+      expect(screen.getByRole("button", { name: `${formatLength(cut.minutes)}, booked at ${formatClock(cut.reason.at)}` })).toBeDisabled();
+    }
+    await user.click(screen.getByRole("button", { name: `30 min, ${formatRange(time, 30)}` }));
+    expect(dispatch).toHaveBeenCalledWith({ type: "pickLength", minutes: 30, from: 7 });
   });
 
   test("slot list shows a heading per day", async () => {
@@ -101,9 +129,11 @@ describe("widgets", () => {
   });
 
   test("summary shows no guests row and dispatches Change and Confirm", async () => {
-    const { dispatch, user } = setup({ kind: "summary", amenity: "tennis", date: "2026-10-31", time: 10, guests: 2 });
+    const { dispatch, user } = setup({ kind: "summary", amenity: "tennis", date: "2026-10-31", time: 600, minutes: 90, guests: 2 });
     expect(screen.getByText("Up to 4 guests · free cancellation up to 24 hrs before")).toBeInTheDocument();
-    expect(screen.getByText("10:00 – 11:00 AM")).toBeInTheDocument();
+    expect(screen.getByText("10:00 – 11:30 AM")).toBeInTheDocument();
+    expect(screen.getByText("Length")).toBeInTheDocument();
+    expect(screen.getByText("1½ hr")).toBeInTheDocument();
     expect(screen.queryByText("Guests")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /guests/ })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Change" }));
@@ -141,7 +171,7 @@ describe("widgets", () => {
   test("confirmation and reservations render text and dispatch nothing", async () => {
     const a = setup({ kind: "confirmation", booking });
     expect(screen.getByText("✓ Reservation confirmed")).toBeInTheDocument();
-    expect(screen.getByText("Tennis Court · Sat, Oct 31 · 10:00 – 11:00 AM · 2 guests")).toBeInTheDocument();
+    expect(screen.getByText("Tennis Court · Sat, Oct 31 · 10:00 – 11:30 AM · 2 guests")).toBeInTheDocument();
     expect(screen.getByText("Confirmation #RS12345")).toBeInTheDocument();
     expect(screen.queryAllByRole("button")).toHaveLength(0);
     a.unmount();

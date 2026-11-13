@@ -1,16 +1,18 @@
 import { getAmenity } from "../../booking/amenities";
-import { formatDayLong, formatRange } from "../../booking/dates";
+import { formatDayLong, formatLength, formatRange } from "../../booking/dates";
 import type { AmenityId, ChatEvent, ISODate } from "../../booking/types";
 
 export function SummaryCard({
   amenity,
   date,
   time,
+  minutes,
   dispatch,
 }: {
   amenity: AmenityId;
   date: ISODate;
   time: number;
+  minutes: number;
   dispatch: (e: ChatEvent) => void;
 }) {
   const a = getAmenity(amenity);
@@ -20,7 +22,8 @@ export function SummaryCard({
       <div className="flex flex-col gap-1.5 px-3 py-2.5 text-[12.5px] text-[#262630]">
         <p className="font-['DM_Sans:SemiBold',sans-serif] font-semibold text-[13.5px]">{a.name}</p>
         <div className="flex justify-between"><span className="text-[#6b6b78]">Date</span><span>{formatDayLong(date)}</span></div>
-        <div className="flex justify-between"><span className="text-[#6b6b78]">Time</span><span>{formatRange(time, a.hours)}</span></div>
+        <div className="flex justify-between"><span className="text-[#6b6b78]">Time</span><span>{formatRange(time, minutes)}</span></div>
+        <div className="flex justify-between"><span className="text-[#6b6b78]">Length</span><span>{formatLength(minutes)}</span></div>
         <p className="text-[12px] leading-[1.45] text-[#6b6b78]">
           Up to {a.maxGuests} guests · free cancellation up to 24 hrs before
         </p>

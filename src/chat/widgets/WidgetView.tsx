@@ -3,6 +3,7 @@ import { AmenityGrid } from "./AmenityGrid";
 import { ChipRow } from "./ChipRow";
 import { ConfirmationCard } from "./ConfirmationCard";
 import { DayStrip } from "./DayStrip";
+import { LengthTiles } from "./LengthTiles";
 import { MonthCalendar } from "./MonthCalendar";
 import { ReservationList } from "./ReservationList";
 import { SlotList } from "./SlotList";
@@ -39,8 +40,11 @@ export function WidgetView({
       case "slotList":
         body = <SlotList amenity={w.amenity} range={w.range} state={state} dispatch={send} />;
         break;
+      case "lengths":
+        body = <LengthTiles amenity={w.amenity} date={w.date} time={w.time} state={state} dispatch={send} />;
+        break;
       case "summary":
-        body = <SummaryCard amenity={w.amenity} date={w.date} time={w.time} dispatch={send} />;
+        body = <SummaryCard amenity={w.amenity} date={w.date} time={w.time} minutes={w.minutes} dispatch={send} />;
         break;
       case "confirmation":
         body = <ConfirmationCard booking={w.booking} />;
