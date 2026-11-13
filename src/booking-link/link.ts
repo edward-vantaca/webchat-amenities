@@ -80,3 +80,7 @@ export function noteText(note: DropNote): string {
       return `${formatHour(note.time)} isn't available that day. Pick another time.`;
   }
 }
+
+export function isBookingLinkPath(pathname: string): boolean {
+  return pathname === "/booking-link" || pathname === "/booking-link/";
+}

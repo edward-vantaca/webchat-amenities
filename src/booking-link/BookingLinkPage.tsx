@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { getAmenity } from "@/booking/amenities";
 import { confirmationNumber, initChat } from "@/booking/chatReducer";
 import { formatDayLong, toISODate } from "@/booking/dates";
@@ -10,7 +10,7 @@ import { DayStrip } from "@/chat/widgets/DayStrip";
 import { MonthCalendar } from "@/chat/widgets/MonthCalendar";
 import { SlotTiles } from "@/chat/widgets/SlotTiles";
 import { SummaryCard } from "@/chat/widgets/SummaryCard";
-import { type DropNote, type LinkDraft, noteText, parseLink, stepBack, stepOf } from "./link";
+import { type DropNote, type LinkDraft, noteText, parseLink, stepBack, stepOf, toSearch } from "./link";
 
 // Placeholders until the magic link signs a real resident in.
 const RESIDENT_LINE = "Maple Ridge HOA · Hi, Jordan";
@@ -32,15 +32,34 @@ type PageState = {
 };
 
 const firstOfMonth = (s: ISODate) => `${s.slice(0, 7)}-01`;
+const PATH = "/booking-link";
 
 export default function BookingLinkPage() {
   const [state, setState] = useState<PageState>(() => ({ ...parseLink(window.location.search, [], new Date()), bookings: [] }));
   const now = new Date();
   const { draft, bookings, done } = state;
   const step = stepOf(draft);
+  const url = (d: LinkDraft) => PATH + toSearch(state.token, d);
+
+  // The address bar always holds exactly what's chosen so far, so dropped link values leave it on load.
+  // Phone back re-reads an earlier entry with the same rules as an incoming link.
+  useEffect(() => {
+    window.history.replaceState(null, "", url(draft));
+    const onPop = () =>
+      setState((s) => {
+        const { draft, note } = parseLink(window.location.search, s.bookings, new Date());
+        return { ...s, draft, note, done: undefined, calendarMonth: undefined };
+      });
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+    // Runs once, on mount.
+  }, []);
 
   // Every tap clears the drop note; leaving the date step closes the calendar.
-  const go = (next: LinkDraft) => setState((s) => ({ ...s, draft: next, note: undefined, calendarMonth: undefined }));
+  function go(next: LinkDraft) {
+    window.history.pushState(null, "", url(next));
+    setState((s) => ({ ...s, draft: next, note: undefined, calendarMonth: undefined }));
+  }
 
   function confirm() {
     if (!draft.amenity || !draft.date || draft.time === undefined) return;
@@ -51,6 +70,8 @@ export default function BookingLinkPage() {
       time: draft.time,
       guests: 1,
     };
+    // Replace, so phone back can't return to a review of a slot that's now taken.
+    window.history.replaceState(null, "", url({}));
     setState((s) => ({ ...s, bookings: [...s.bookings, booking], done: booking, draft: {}, note: undefined, calendarMonth: undefined }));
   }
 
@@ -83,7 +104,10 @@ export default function BookingLinkPage() {
         <p className="text-[14px] text-[#6b6b78]">You can close this page.</p>
         <button
           type="button"
-          onClick={() => setState((s) => ({ ...s, done: undefined }))}
+          onClick={() => {
+            window.history.pushState(null, "", url({}));
+            setState((s) => ({ ...s, done: undefined }));
+          }}
           className="font-['DM_Sans:SemiBold',sans-serif] font-semibold rounded-lg border border-[#cfd6df] py-2.5 text-[15px] text-[#262630] hover:bg-[#f4f6f9] cursor-pointer"
         >
           Book something else

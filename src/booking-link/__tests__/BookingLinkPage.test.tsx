@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import BookingLinkPage from "../BookingLinkPage";
 import { AMENITIES } from "@/booking/amenities";
@@ -101,5 +101,61 @@ describe("BookingLinkPage", () => {
     await user.click(screen.getByRole("button", { name: /Tennis Court/ }));
     await user.click(screen.getByRole("button", { name: formatDayLong(OPEN_DAY) }));
     expect(screen.getByRole("button", { name: formatHour(OPEN_HOUR) })).toBeDisabled();
+  });
+});
+
+describe("BookingLinkPage address bar", () => {
+  const back = () => act(() => window.history.back());
+
+  test("address bar follows taps", async () => {
+    const user = open("?token=t");
+    await user.click(screen.getByRole("button", { name: /Tennis Court/ }));
+    expect(window.location.search).toBe("?token=t&amenity=tennis");
+    await user.click(screen.getByRole("button", { name: formatDayLong(OPEN_DAY) }));
+    expect(window.location.search).toBe(`?token=t&amenity=tennis&date=${OPEN_DAY}`);
+  });
+
+  test("normalizes dropped values on load", () => {
+    open(`?token=t&amenity=squash&date=${OPEN_DAY}`);
+    expect(window.location.search).toBe("?token=t");
+  });
+
+  test("phone back retraces taps", async () => {
+    const user = open("?token=t");
+    await user.click(screen.getByRole("button", { name: /Tennis Court/ }));
+    await user.click(screen.getByRole("button", { name: formatDayLong(OPEN_DAY) }));
+    back();
+    expect(await screen.findByRole("heading", { name: "Pick a date" })).toBeInTheDocument();
+    back();
+    expect(await screen.findByRole("heading", { name: "Choose an amenity" })).toBeInTheDocument();
+  });
+
+  test("back after confirm lands on times with the booked slot taken", async () => {
+    const user = open("?token=t&amenity=tennis");
+    await user.click(screen.getByRole("button", { name: formatDayLong(OPEN_DAY) }));
+    await user.click(screen.getByRole("button", { name: formatHour(OPEN_HOUR) }));
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+    expect(window.location.search).toBe("?token=t");
+    back();
+    expect(await screen.findByRole("heading", { name: "Pick a time" })).toBeInTheDocument();
+    expect(window.location.search).toBe(`?token=t&amenity=tennis&date=${OPEN_DAY}`);
+    expect(screen.getByRole("button", { name: formatHour(OPEN_HOUR) })).toBeDisabled();
+  });
+
+  test("token kept through taps, confirm and book something else", async () => {
+    const seen: string[] = [];
+    const user = open("?token=t");
+    await user.click(screen.getByRole("button", { name: /Tennis Court/ }));
+    seen.push(window.location.search);
+    await user.click(screen.getByRole("button", { name: formatDayLong(OPEN_DAY) }));
+    seen.push(window.location.search);
+    await user.click(screen.getByRole("button", { name: formatHour(OPEN_HOUR) }));
+    seen.push(window.location.search);
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+    seen.push(window.location.search);
+    await user.click(screen.getByRole("button", { name: "Book something else" }));
+    seen.push(window.location.search);
+    for (const s of seen) expect(s.startsWith("?token=t")).toBe(true);
+    expect(seen[2]).toBe(`?token=t&amenity=tennis&date=${OPEN_DAY}&time=${OPEN_HOUR}`);
   });
 });

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { noteText, parseLink, stepBack, stepOf, toSearch } from "../link";
+import { isBookingLinkPath, noteText, parseLink, stepBack, stepOf, toSearch } from "../link";
 import { AMENITIES } from "@/booking/amenities";
 import { hasOpenSlot, isFullyBookedByMock, isMockTaken, startTimes } from "@/booking/availability";
 import { addDays } from "@/booking/dates";
@@ -134,4 +134,10 @@ test("noteText copy", () => {
   expect(noteText({ reason: "date" })).toBe("That date isn't available. Pick another day.");
   expect(noteText({ reason: "timeTaken", time: 10 })).toBe("10:00 AM is taken that day. Pick another time.");
   expect(noteText({ reason: "timeUnavailable", time: 22 })).toBe("10:00 PM isn't available that day. Pick another time.");
+});
+
+test("route match", () => {
+  expect(isBookingLinkPath("/booking-link")).toBe(true);
+  expect(isBookingLinkPath("/booking-link/")).toBe(true);
+  for (const p of ["/", "/booking-links", "/booking-link/x"]) expect(isBookingLinkPath(p)).toBe(false);
 });
