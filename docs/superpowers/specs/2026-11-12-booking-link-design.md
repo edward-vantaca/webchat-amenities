@@ -21,7 +21,7 @@ The tap flow already exists in the Ask HOAi chat (`docs/superpowers/specs/2026-1
 - Real bookings. Confirming pretends, exactly as the chat does: a made-up confirmation number, kept only while the page is open.
 - The agent side: generating or sending links, voice or SMS integration.
 - Hosting. This is a local demo, run on the Vite dev server (the user's decision). No hosting config or production fallback for `/booking-link`.
-- Viewing or cancelling existing reservations.
+- Viewing or cancelling reservations made elsewhere (only the one just booked on this page can be changed or cancelled).
 - Guest count. The summary card no longer has a guest stepper, and this page doesn't either.
 - Typing or free text of any kind.
 
@@ -111,3 +111,14 @@ A date without an amenity is ignored, and so is a time without a date.
 - Whether page state is a small reducer or plain state, and how it shares the chat's pretend-booking logic.
 - Exact spacing and type sizes, within the sizing rule above.
 - Tests: link parsing (each fallback row and each drop reason), step navigation including the browser back button, the done screen, and "Book something else". The chat's existing tests must still pass.
+
+## Update 2026-11-16: confirmation screen (from the 2026-11-13 review with the voice/SMS team)
+
+Feedback: the done screen had no way to fix a booking the agent got wrong (wrong date or time), and it was less visual than the review screen. If the agent books directly, the link it sends lands on this confirmation and must allow edit and cancel.
+
+- The done screen is titled "You're booked" and shows a card in the review card's style: amenity photo with a "✓ Reservation confirmed" badge, the name, Date / Time / Length rows and the confirmation number.
+- **Change booking** (primary button): frees the slot and reopens the flow on "Pick a time" with the amenity and date kept, so a wrong time is one tap away and a wrong date is one Back away. It works as cancel and rebook, and confirming again gives a new confirmation number. Whether the real API edits in place or cancels and rebooks is still being confirmed.
+- **Book something else** stays as the secondary button.
+- **Cancel reservation** (red text link) asks first ("Keep it" / "Yes, cancel"), then shows "Reservation cancelled" with the card greyed and only "Book something else".
+
+Still open, not built yet: a "submitted for approval" (pending) status for communities that need a manager to approve; how long links stay valid (short before confirming, until the booking ends plus about an hour after); and reopening a confirmed link to show its confirmation.

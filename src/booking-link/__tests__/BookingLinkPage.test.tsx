@@ -60,7 +60,8 @@ describe("BookingLinkPage", () => {
     await user.click(screen.getByRole("button", { name: "Confirm" }));
     expect(screen.getByText("✓ Reservation confirmed")).toBeInTheDocument();
     expect(screen.getByText(new RegExp(formatRange(OPEN_TIME, 60)))).toBeInTheDocument();
-    expect(screen.getByText(/Confirmation #RS\d{5}/)).toBeInTheDocument();
+    expect(screen.getByText(/^#RS\d{5}$/)).toBeInTheDocument();
+    expect(heading("You're booked")).toBeInTheDocument();
     expect(screen.getByText("You can close this page.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "‹ Back" })).not.toBeInTheDocument();
   });
@@ -152,6 +153,34 @@ describe("BookingLinkPage", () => {
     await user.click(screen.getByRole("button", { name: /Tennis Court/ }));
     await user.click(screen.getByRole("button", { name: formatDayLong(OPEN_DAY) }));
     expect(screen.getByRole("button", { name: formatTime(OPEN_TIME) })).toBeDisabled();
+  });
+
+  test("Change booking frees the slot and reopens on its times", async () => {
+    const user = open(REVIEW_LINK);
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+    await user.click(screen.getByRole("button", { name: "Change booking" }));
+    expect(heading("Pick a time")).toBeInTheDocument();
+    expect(window.location.search).toBe(`?token=t&amenity=tennis&date=${OPEN_DAY}`);
+    expect(screen.getByRole("button", { name: formatTime(OPEN_TIME) })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "‹ Back" }));
+    expect(heading("Pick a date")).toBeInTheDocument();
+  });
+
+  test("Cancel reservation asks first, then frees the slot", async () => {
+    const user = open(REVIEW_LINK);
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+    await user.click(screen.getByRole("button", { name: "Cancel reservation" }));
+    await user.click(screen.getByRole("button", { name: "Keep it" }));
+    expect(screen.getByText("✓ Reservation confirmed")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Cancel reservation" }));
+    expect(screen.getByRole("alertdialog", { name: "Cancel this reservation?" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Yes, cancel" }));
+    expect(heading("Reservation cancelled")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Change booking" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Book something else" }));
+    await user.click(screen.getByRole("button", { name: /Tennis Court/ }));
+    await user.click(screen.getByRole("button", { name: formatDayLong(OPEN_DAY) }));
+    expect(screen.getByRole("button", { name: formatTime(OPEN_TIME) })).toBeEnabled();
   });
 });
 

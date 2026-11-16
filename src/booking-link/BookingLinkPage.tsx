@@ -5,12 +5,12 @@ import { formatDayLong, formatLimit, formatTime, toISODate } from "@/booking/dat
 import type { Booking, ChatEvent, ChatState, ISODate } from "@/booking/types";
 import { AskHoaiIcon } from "@/chat/AskHoaiPanel";
 import { AmenityGrid } from "@/chat/widgets/AmenityGrid";
-import { ConfirmationCard } from "@/chat/widgets/ConfirmationCard";
 import { DayStrip } from "@/chat/widgets/DayStrip";
 import { LengthTiles } from "@/chat/widgets/LengthTiles";
 import { MonthCalendar } from "@/chat/widgets/MonthCalendar";
 import { SlotTiles } from "@/chat/widgets/SlotTiles";
 import { SummaryCard } from "@/chat/widgets/SummaryCard";
+import { BookedCard } from "./BookedCard";
 import { DevicePreview } from "./DevicePreview";
 import { type DropNote, type LinkDraft, noteText, parseLink, stepBack, stepOf, toSearch } from "./link";
 
@@ -33,6 +33,8 @@ type PageState = {
   bookings: Booking[];
   calendarMonth?: ISODate; // set while the month calendar replaces the day strip
   done?: Booking;
+  // On the done screen: asking "cancel this?", or the booking has been cancelled.
+  doneMode?: "askCancel" | "cancelled";
 };
 
 const firstOfMonth = (s: ISODate) => `${s.slice(0, 7)}-01`;
@@ -55,7 +57,7 @@ export default function BookingLinkPage() {
     const onPop = () => {
       const { draft, note } = parseLink(window.location.search, latest.current.bookings, new Date());
       window.history.replaceState(null, "", PATH + toSearch(latest.current.token, draft));
-      setState((s) => ({ ...s, draft, note, done: undefined, calendarMonth: undefined }));
+      setState((s) => ({ ...s, draft, note, done: undefined, doneMode: undefined, calendarMonth: undefined }));
     };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
@@ -80,7 +82,26 @@ export default function BookingLinkPage() {
     };
     // Replace, so phone back can't return to a review of a slot that's now taken.
     window.history.replaceState(null, "", url({}));
-    setState((s) => ({ ...s, bookings: [...s.bookings, booking], done: booking, draft: {}, note: undefined, calendarMonth: undefined }));
+    setState((s) => ({ ...s, bookings: [...s.bookings, booking], done: booking, doneMode: undefined, draft: {}, note: undefined, calendarMonth: undefined }));
+  }
+
+  const release = (b: Booking) => (list: Booking[]) => list.filter((x) => x.confirmation !== b.confirmation);
+
+  // Change booking: free the slot and reopen the flow on its times (amenity and date kept), so a
+  // wrong time is one tap away and a wrong date is one Back away. Pretend edit = cancel and rebook.
+  function changeBooking(b: Booking) {
+    const next: LinkDraft = { amenity: b.amenity, date: b.date };
+    window.history.pushState(null, "", url(next));
+    setState((s) => ({ ...s, bookings: release(b)(s.bookings), done: undefined, doneMode: undefined, draft: next, note: undefined }));
+  }
+
+  function cancelBooking(b: Booking) {
+    setState((s) => ({ ...s, bookings: release(b)(s.bookings), doneMode: "cancelled" }));
+  }
+
+  function bookSomethingElse() {
+    window.history.pushState(null, "", url({}));
+    setState((s) => ({ ...s, done: undefined, doneMode: undefined }));
   }
 
   // The chat widgets read a ChatState and send ChatEvents; translate both ways.
@@ -114,21 +135,59 @@ export default function BookingLinkPage() {
   const dir = slide.current.dir;
 
   let body;
-  if (done) {
+  const primaryBtn =
+    "font-['DM_Sans:SemiBold',sans-serif] font-semibold rounded-lg bg-[#247ae4] py-2.5 text-[15px] text-white hover:bg-[#1d5fb8] cursor-pointer";
+  const secondaryBtn =
+    "font-['DM_Sans:SemiBold',sans-serif] font-semibold rounded-lg border border-[#cfd6df] py-2.5 text-[15px] text-[#262630] hover:bg-[#f4f6f9] cursor-pointer";
+  const linkBtn = "font-['DM_Sans:SemiBold',sans-serif] font-semibold self-center text-[14px] cursor-pointer";
+
+  if (done && state.doneMode === "cancelled") {
     body = (
       <div className="flex flex-col gap-4">
-        <ConfirmationCard booking={done} />
-        <p className="text-[14px] text-[#6b6b78]">You can close this page.</p>
-        <button
-          type="button"
-          onClick={() => {
-            window.history.pushState(null, "", url({}));
-            setState((s) => ({ ...s, done: undefined }));
-          }}
-          className="font-['DM_Sans:SemiBold',sans-serif] font-semibold rounded-lg border border-[#cfd6df] py-2.5 text-[15px] text-[#262630] hover:bg-[#f4f6f9] cursor-pointer"
-        >
+        <h1 className="font-['DM_Sans:SemiBold',sans-serif] font-semibold text-[22px] text-[#262630]">Reservation cancelled</h1>
+        <BookedCard booking={done} cancelled />
+        <p className="text-[14px] text-[#6b6b78]">The time is free again. You can close this page.</p>
+        <button type="button" onClick={bookSomethingElse} className={secondaryBtn}>
           Book something else
         </button>
+      </div>
+    );
+  } else if (done) {
+    const asking = state.doneMode === "askCancel";
+    body = (
+      <div className="flex flex-col gap-4">
+        <h1 className="font-['DM_Sans:SemiBold',sans-serif] font-semibold text-[22px] text-[#262630]">You're booked</h1>
+        <BookedCard booking={done} />
+        {asking ? (
+          <div role="alertdialog" aria-label="Cancel this reservation?" className="flex flex-col gap-2 rounded-xl border border-[#f3c7c3] bg-[#fdf3f2] p-3">
+            <p className="text-[14px] text-[#262630]">Cancel this reservation? The time will be released for others.</p>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setState((s) => ({ ...s, doneMode: undefined }))} className={`${secondaryBtn} flex-1 bg-white`}>
+                Keep it
+              </button>
+              <button
+                type="button"
+                onClick={() => cancelBooking(done)}
+                className="font-['DM_Sans:SemiBold',sans-serif] font-semibold flex-1 rounded-lg bg-[#c4372c] py-2.5 text-[15px] text-white hover:bg-[#a42d24] cursor-pointer"
+              >
+                Yes, cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <button type="button" onClick={() => changeBooking(done)} className={primaryBtn}>
+              Change booking
+            </button>
+            <button type="button" onClick={bookSomethingElse} className={secondaryBtn}>
+              Book something else
+            </button>
+            <button type="button" onClick={() => setState((s) => ({ ...s, doneMode: "askCancel" }))} className={`${linkBtn} text-[#c4372c]`}>
+              Cancel reservation
+            </button>
+            <p className="text-center text-[13px] text-[#6b6b78]">You can close this page.</p>
+          </>
+        )}
       </div>
     );
   } else {
