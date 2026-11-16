@@ -135,8 +135,6 @@ export default function BookingLinkPage() {
   const dir = slide.current.dir;
 
   let body;
-  const primaryBtn =
-    "font-['DM_Sans:SemiBold',sans-serif] font-semibold rounded-lg bg-[#247ae4] py-2.5 text-[15px] text-white hover:bg-[#1d5fb8] cursor-pointer";
   const secondaryBtn =
     "font-['DM_Sans:SemiBold',sans-serif] font-semibold rounded-lg border border-[#cfd6df] py-2.5 text-[15px] text-[#262630] hover:bg-[#f4f6f9] cursor-pointer";
   const linkBtn = "font-['DM_Sans:SemiBold',sans-serif] font-semibold self-center text-[14px] cursor-pointer";
@@ -176,7 +174,7 @@ export default function BookingLinkPage() {
           </div>
         ) : (
           <>
-            <button type="button" onClick={() => changeBooking(done)} className={primaryBtn}>
+            <button type="button" onClick={() => changeBooking(done)} className={secondaryBtn}>
               Change booking
             </button>
             <button type="button" onClick={bookSomethingElse} className={secondaryBtn}>

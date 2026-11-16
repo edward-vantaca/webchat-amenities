@@ -117,7 +117,7 @@ A date without an amenity is ignored, and so is a time without a date.
 Feedback: the done screen had no way to fix a booking the agent got wrong (wrong date or time), and it was less visual than the review screen. If the agent books directly, the link it sends lands on this confirmation and must allow edit and cancel.
 
 - The done screen is titled "You're booked" and shows a card in the review card's style: amenity photo with a "✓ Reservation confirmed" badge, the name, Date / Time / Length rows and the confirmation number.
-- **Change booking** (primary button): frees the slot and reopens the flow on "Pick a time" with the amenity and date kept, so a wrong time is one tap away and a wrong date is one Back away. It works as cancel and rebook, and confirming again gives a new confirmation number. Whether the real API edits in place or cancels and rebooks is still being confirmed.
+- **Change booking** (secondary button, above "Book something else"): frees the slot and reopens the flow on "Pick a time" with the amenity and date kept, so a wrong time is one tap away and a wrong date is one Back away. It works as cancel and rebook, and confirming again gives a new confirmation number. Whether the real API edits in place or cancels and rebooks is still being confirmed.
 - **Book something else** stays as the secondary button.
 - **Cancel reservation** (red text link) asks first ("Keep it" / "Yes, cancel"), then shows "Reservation cancelled" with the card greyed and only "Book something else".
 
