@@ -117,7 +117,7 @@ describe("tap path", () => {
     s = chatReducer(s, { type: "confirm", from: last(s).id });
     expect(s.bookings).toHaveLength(1);
     expect(s.bookings[0]).toMatchObject({ amenity: "tennis", date: OPEN_DAY, time: OPEN_TIME, minutes: 60, guests: 1 });
-    expect(s.bookings[0].confirmation).toMatch(/^RS\d{5}$/);
+    expect(s.bookings[0].confirmation).toMatch(/^XN\d{5}$/);
     expect(s.draft).toEqual({ guests: 1 });
     const confirmMsg = s.messages.find((m) => m.widget?.kind === "confirmation")!;
     expect(confirmMsg.text).toBe("You're all set!");

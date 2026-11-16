@@ -81,7 +81,7 @@ describe("parseLink", () => {
   });
 
   test("an hour the resident already booked is taken", () => {
-    const mine: Booking = { confirmation: "RS10000", amenity: "tennis", date: OPEN_DAY, time: OPEN_TIME, minutes: 30, guests: 1 };
+    const mine: Booking = { confirmation: "XN10000", amenity: "tennis", date: OPEN_DAY, time: OPEN_TIME, minutes: 30, guests: 1 };
     expect(parse(`?amenity=tennis&date=${OPEN_DAY}&time=${hhmm(OPEN_TIME)}`, [mine]).note).toEqual({ reason: "timeTaken", time: OPEN_TIME });
   });
 

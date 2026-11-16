@@ -60,7 +60,7 @@ describe("BookingLinkPage", () => {
     await user.click(screen.getByRole("button", { name: "Confirm" }));
     expect(screen.getByText("✓ Reservation confirmed")).toBeInTheDocument();
     expect(screen.getByText(new RegExp(formatRange(OPEN_TIME, 60)))).toBeInTheDocument();
-    expect(screen.getByText(/^#RS\d{5}$/)).toBeInTheDocument();
+    expect(screen.getByText(/^#XN\d{5}$/)).toBeInTheDocument();
     expect(heading("You're booked")).toBeInTheDocument();
     expect(screen.getByText("You can close this page.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "‹ Back" })).not.toBeInTheDocument();

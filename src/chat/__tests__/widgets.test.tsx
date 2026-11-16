@@ -24,7 +24,7 @@ function setup(widget: Widget, state: ChatState = base, active = true) {
   return { dispatch, user: userEvent.setup(), ...utils };
 }
 
-const booking: Booking = { confirmation: "RS12345", amenity: "tennis", date: "2026-10-31", time: 600, minutes: 90, guests: 2 };
+const booking: Booking = { confirmation: "XN12345", amenity: "tennis", date: "2026-10-31", time: 600, minutes: 90, guests: 2 };
 
 describe("widgets", () => {
   test("amenity grid dispatches pickAmenity with message id", async () => {
@@ -172,10 +172,10 @@ describe("widgets", () => {
     const a = setup({ kind: "confirmation", booking });
     expect(screen.getByText("✓ Reservation confirmed")).toBeInTheDocument();
     expect(screen.getByText("Tennis Court · Sat, Oct 31 · 10:00 – 11:30 AM · 2 guests")).toBeInTheDocument();
-    expect(screen.getByText("Confirmation #RS12345")).toBeInTheDocument();
+    expect(screen.getByText("Confirmation #XN12345")).toBeInTheDocument();
     expect(screen.queryAllByRole("button")).toHaveLength(0);
     a.unmount();
-    setup({ kind: "reservations", bookings: [booking, { ...booking, confirmation: "RS2", guests: 1 }] });
+    setup({ kind: "reservations", bookings: [booking, { ...booking, confirmation: "XN2", guests: 1 }] });
     expect(screen.getAllByText(/Tennis Court · Sat, Oct 31/)).toHaveLength(2);
     expect(screen.getByText(/1 guest$/)).toBeInTheDocument();
   });

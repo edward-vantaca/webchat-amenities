@@ -94,7 +94,7 @@ describe("availability", () => {
 
   test("a booking blocks its whole span", () => {
     const d = window.find((x) => free("clubhouse", x, 540, 570, 600, 630, 660, 690, 720))!;
-    const b: Booking = { confirmation: "RS1", amenity: "clubhouse", date: d, time: 600, minutes: 90, guests: 2 };
+    const b: Booking = { confirmation: "XN1", amenity: "clubhouse", date: d, time: 600, minutes: 90, guests: 2 };
     const open = (t: number) => slotsFor("clubhouse", d, [b], now).find((s) => s.time === t)!.open;
     for (const t of [600, 630, 660]) expect(open(t)).toBe(false);
     expect(open(690)).toBe(true);

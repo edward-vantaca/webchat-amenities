@@ -199,7 +199,7 @@ function reshow(state: ChatState, text: string): ChatState {
 
 export function confirmationNumber(nextId: number, date: ISODate, time: number): string {
   const seed = Number(date.replace(/-/g, "")) + nextId * 7919 + time * 31;
-  return `RS${10000 + (seed % 90000)}`;
+  return `XN${10000 + (seed % 90000)}`;
 }
 
 function confirm(state: ChatState, summary: ChatMessage, echo?: string): ChatState {
